@@ -37,6 +37,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
+      # vitest runs under Node; the app's formats want Intl.DurationFormat (Node 23+)
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
       - run: bun install --frozen-lockfile
       - run: bun run check
       - run: bun run test
