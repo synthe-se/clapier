@@ -1,9 +1,9 @@
 # <img src="web/public/brand.svg" alt="" width="36" align="top"> Clapier
 
-[![ci](https://github.com/uplg/clapier/actions/workflows/ci.yml/badge.svg)](https://github.com/uplg/clapier/actions/workflows/ci.yml)
-[![release](https://img.shields.io/github/v/release/uplg/clapier)](https://github.com/uplg/clapier/releases)
+[![ci](https://github.com/synthe-se/clapier/actions/workflows/ci.yml/badge.svg)](https://github.com/synthe-se/clapier/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/synthe-se/clapier)](https://github.com/synthe-se/clapier/releases)
 [![changelog](https://img.shields.io/badge/changelog-keep%20a%20changelog-E05735)](CHANGELOG.md)
-[![license](https://img.shields.io/github/license/uplg/clapier)](LICENSE)
+[![license](https://img.shields.io/github/license/synthe-se/clapier)](LICENSE)
 
 The rabbits' home: one binary serves a Nabaztag:tag its brain, its
 sounds and its dances, and gives you a web app to watch and drive the
@@ -17,7 +17,7 @@ whole burrow. Pairs with the [uplg/nabgcc](https://github.com/uplg/nabgcc)
 
 ## Install
 
-Grab the [latest release](https://github.com/uplg/clapier/releases): Linux
+Grab the [latest release](https://github.com/synthe-se/clapier/releases): Linux
 (x86_64, aarch64, ARMv6 for the Raspberry Pi 1), macOS and Windows
 archives carry the server, `garenne.bin` (the rabbit's brain), the
 firmware flasher, the rabbit remote and the choreography encoder.
