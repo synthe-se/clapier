@@ -1,8 +1,9 @@
 [package]
 name = "clapier-pages"
-description = "Human-facing HTML for the burrow: status page, directory listings"
+description = "The burrow for humans: the embedded web app and directory listings"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 publish = false
 license.workspace = true
 repository.workspace = true

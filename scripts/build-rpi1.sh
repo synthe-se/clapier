@@ -28,6 +28,16 @@ if [ "$(uname -s)" = "Darwin" ]; then
   ulimit -n "${BUILD_ULIMIT_NOFILE:-4096}" 2>/dev/null || true
 fi
 
+# The web app is embedded into the binary: build it first (bun on the Mac).
+REPO_ROOT="$(dirname "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)")"
+if command -v bun >/dev/null 2>&1; then
+  printf 'Building the web app\n'
+  (cd "${REPO_ROOT}/web" && bun install --frozen-lockfile && bun run build)
+elif [ ! -f "${REPO_ROOT}/web/dist/index.html" ]; then
+  printf 'Missing bun and web/dist: the burrow would ship without its web app.\n' >&2
+  exit 1
+fi
+
 printf 'Cross-compiling clapier + garenne-ctl for %s\n' "${TARGET}"
 
 rustup run "${TOOLCHAIN}" cargo zigbuild \

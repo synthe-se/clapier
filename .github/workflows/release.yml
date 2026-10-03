@@ -27,10 +27,31 @@ jobs:
             exit 1
           fi
 
+  web:
+    name: web app
+    needs: version
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run test
+      - run: bun run build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: web
+          path: web/dist
+          if-no-files-found: error
+
   server:
     name: server ${{ matrix.name }}
-    # garenne rides inside each archive so adoption works out of the box.
-    needs: [version, garenne]
+    # garenne rides inside each archive so adoption works out of the box;
+    # the web app is embedded into the binary at build time.
+    needs: [version, garenne, web]
     strategy:
       fail-fast: false
       matrix:
@@ -71,6 +92,10 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: garenne
+      - uses: actions/download-artifact@v8
+        with:
+          name: web
+          path: web/dist
       - name: build
         if: ${{ !matrix.zigbuild }}
         run: cargo build --release --locked --target ${{ matrix.target }} -p clapier -p clapier-chor -p clapier-flash

@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-03
+
+### Added
+
+- A new web app for the burrow (`web/`, Svelte 5 + Bits UI, French and
+  English through Paraglide), in Maison's and Ariane's design language
+  with Clapier's own violet. One screen: every rabbit as a tile (its
+  state in words, uptime, Wi-Fi, ears, sound, dance, a live avatar whose
+  ears follow the real ones), its gestures (ping, salute, hush, reboot
+  behind a confirmation, the .chor library, composing a choreography,
+  colour, ears, speech), and the request journal. Light and dark themes,
+  phone to wide screen. Built with bun, embedded into the binary at build
+  time: still one file to deploy.
+- Rabbits have names: set from the web app, kept in their burrow
+  (`overlay/rabbits/<mac>/name`).
+- Clapier's brand: a Nabaztag at the door of its burrow, its belly LEDs
+  lit.
+- On the Pi, `http://clapier.local/`: `deploy-pi.sh` installs avahi and a
+  `clapier-mdns` OpenRC service publishing the alias (IPv4 and IPv6,
+  read at each start).
+- A JSON API under `/_clapier/api` (`status`, `ctl`, `dance`, `say`,
+  `name`); refusals carry a stable code the web app words itself.
+
+### Changed
+
+- The status and pilot HTML pages are replaced by the web app, served at
+  the root (`http://<server>/`); `/_clapier` and `/_clapier/pilot`
+  redirect there. The web app is served under a strict
+  Content-Security-Policy, its hashed assets cached for good.
+- Every dependency to its latest; Rust 1.99 is the declared minimum.
+- pocket-tts follows Kyutai upstream to 3.3.0 (41cbc84): retrained
+  models and voices, the French default temperature drops to 0.3, so the
+  rabbit's voice changes a little (`--temp 0.7` brings the old warmth
+  back); its dependencies to their latest too.
+- CI and the release build the web app before the server.
+- A shorter README, with a screenshot.
+
 ## [0.2.0] - 2026-08-15
 
 ### Added
@@ -137,7 +174,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with checksums for everything.
 - The README's adoption guide, from cupboard to burrow.
 
-[Unreleased]: https://github.com/uplg/clapier/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/uplg/clapier/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/uplg/clapier/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/uplg/clapier/compare/v0.1.5...v0.2.0
 [0.1.5]: https://github.com/uplg/clapier/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/uplg/clapier/compare/v0.1.3...v0.1.4

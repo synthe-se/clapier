@@ -38,7 +38,7 @@ printf '==> Preparing %s on %s\n' "${APP_DIR}" "${PI_HOST}"
 ssh "${PI_HOST}" sh -s -- "${APP_DIR}" <<'EOF'
 set -eu
 APP_DIR="$1"
-apk add --no-cache rsync libcap >/dev/null
+apk add --no-cache rsync libcap avahi avahi-tools dbus >/dev/null
 if ! getent group clapier >/dev/null 2>&1; then addgroup -S clapier; fi
 if ! id -u clapier >/dev/null 2>&1; then
   adduser -S -D -H -h "${APP_DIR}" -G clapier -s /sbin/nologin clapier
@@ -63,10 +63,16 @@ TMP_UNIT="$(mktemp)"
 sed -e "s#@@RABBIT_IP@@#${RABBIT_IP}#g" "${REPO_ROOT}/deploy/openrc/clapier" > "${TMP_UNIT}"
 rsync -avz "${TMP_UNIT}" "${PI_HOST}:/etc/init.d/clapier"
 rm -f "${TMP_UNIT}"
+rsync -avz "${REPO_ROOT}/deploy/openrc/clapier-mdns" "${PI_HOST}:/etc/init.d/clapier-mdns"
 ssh "${PI_HOST}" sh -s -- "${APP_DIR}" <<'EOF'
 set -eu
 APP_DIR="$1"
-chmod +x /etc/init.d/clapier
+chmod +x /etc/init.d/clapier /etc/init.d/clapier-mdns
+# http://clapier.local on the LAN (mDNS through avahi)
+for svc in dbus avahi-daemon clapier-mdns; do
+  rc-update add "${svc}" default >/dev/null 2>&1 || true
+  rc-service "${svc}" start >/dev/null 2>&1 || true
+done
 chown -R clapier:clapier "${APP_DIR}"
 # Port 80 without root.
 setcap 'cap_net_bind_service=+ep' "${APP_DIR}/clapier"
@@ -76,4 +82,4 @@ sleep 2
 rc-service clapier status
 EOF
 
-printf '==> Done. Logs: ssh %s tail -f /var/log/clapier.log\n' "${PI_HOST}"
+printf '==> Done: http://clapier.local/ . Logs: ssh %s tail -f /var/log/clapier.log\n' "${PI_HOST}"
