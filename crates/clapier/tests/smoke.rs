@@ -39,7 +39,7 @@ async fn spawn_server_full(
     addr
 }
 
-fn raw_request(addr: SocketAddr, request: &'static [u8]) -> Vec<u8> {
+fn raw_request(addr: SocketAddr, request: &[u8]) -> Vec<u8> {
     let mut sock = std::net::TcpStream::connect(addr).expect("connect");
     sock.write_all(request).expect("send");
     let mut buf = Vec::new();
@@ -164,14 +164,15 @@ async fn fleet_remembers_the_boot_fetch() {
     })
     .await
     .expect("join");
-    let status =
-        tokio::task::spawn_blocking(move || raw_request(addr, b"GET /_clapier HTTP/1.0\r\n\r\n"))
-            .await
-            .expect("join");
+    let status = tokio::task::spawn_blocking(move || {
+        raw_request(addr, b"GET /_clapier/api/status HTTP/1.0\r\n\r\n")
+    })
+    .await
+    .expect("join");
 
-    let page = String::from_utf8_lossy(&status);
-    assert!(page.contains("0019db9c2815"), "fleet table: {page}");
-    assert!(page.contains("last bc.jsp"), "fleet table: {page}");
+    let json = String::from_utf8_lossy(&status);
+    assert!(json.contains("\"mac\":\"0019db9c2815\""), "status: {json}");
+    assert!(json.contains("\"boot_s\":0"), "status: {json}");
 }
 
 /// Overlay with no base tree at all: the overlay serves, everything
@@ -209,38 +210,90 @@ async fn overlay_alone_serves_and_404s_the_rest() {
     assert!(head.contains(" 404 "), "response: {head}");
 }
 
-/// The pilot page answers even with an empty fleet, and the control
-/// endpoint refuses an IP the fleet never heard of.
+/// The web app's shell answers at every address it lives at, under its
+/// security policy, and the control endpoint refuses an IP the fleet
+/// never heard of with a code the app can word.
 #[tokio::test]
-async fn pilot_page_stands_and_guards() {
+async fn the_web_app_stands_and_the_pilot_guards() {
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::create_dir(dir.path().join("vl")).expect("mkdir vl");
 
     let addr = spawn_server(dir.path().to_path_buf()).await;
-    let page = tokio::task::spawn_blocking(move || {
-        raw_request(addr, b"GET /_clapier/pilot HTTP/1.0\r\n\r\n")
-    })
-    .await
-    .expect("join");
-    let text = String::from_utf8_lossy(&page);
-    assert!(text.contains("pilot"), "page: {text}");
-    assert!(text.contains("no named rabbit yet"), "page: {text}");
+    for path in ["/_clapier", "/_clapier/", "/_clapier/pilot"] {
+        let request = format!("GET {path} HTTP/1.0\r\n\r\n");
+        let page = tokio::task::spawn_blocking(move || raw_request(addr, request.as_bytes()))
+            .await
+            .expect("join");
+        let text = String::from_utf8_lossy(&page).to_ascii_lowercase();
+        assert!(text.starts_with("http/1.0 200"), "{path}: {text}");
+        assert!(text.contains("content-security-policy:"), "{path}: {text}");
+        assert!(text.contains("<!doctype html>"), "{path}: {text}");
+    }
 
-    let refused = tokio::task::spawn_blocking(move || {
-        raw_request(
-            addr,
-            b"POST /_clapier/ctl HTTP/1.0\r\ncontent-type: application/x-www-form-urlencoded\r\n\
-content-length: 29\r\n\r\nip=192.168.1.99&cmd=reboot%20",
-        )
+    let missing = tokio::task::spawn_blocking(move || {
+        raw_request(addr, b"GET /_clapier/assets/nothing.js HTTP/1.0\r\n\r\n")
     })
     .await
     .expect("join");
+    assert!(missing.starts_with(b"HTTP/1.0 404"));
+
+    let body = r#"{"ip":"192.168.1.99","cmd":"reboot"}"#;
+    let request = format!(
+        "POST /_clapier/api/ctl HTTP/1.0\r\ncontent-type: application/json\r\n\
+content-length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    let refused = tokio::task::spawn_blocking(move || raw_request(addr, request.as_bytes()))
+        .await
+        .expect("join");
     let text = String::from_utf8_lossy(&refused);
-    assert!(text.contains("303"), "response: {text}");
+    assert!(text.starts_with("HTTP/1.0 404"), "response: {text}");
     assert!(
-        text.to_lowercase().contains("location:"),
+        text.contains(r#"{"code":"unknown_rabbit"}"#),
         "response: {text}"
     );
+}
+
+/// A rabbit named from the web app keeps its name in its burrow, and
+/// the status says it.
+#[tokio::test]
+async fn a_rabbit_keeps_its_name() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let overlay = dir.path().join("overlay");
+    std::fs::create_dir(&overlay).expect("mkdir overlay");
+    let addr = spawn_server_with_overlay(None, Some(overlay.clone())).await;
+    tokio::task::spawn_blocking(move || {
+        raw_request(addr, b"GET /vl/bc.jsp?m=00:19:db:9c:28:15 HTTP/1.0\r\n\r\n")
+    })
+    .await
+    .expect("join");
+
+    let body = r#"{"mac":"0019db9c2815","name":" Garen "}"#;
+    let request = format!(
+        "POST /_clapier/api/name HTTP/1.0\r\ncontent-type: application/json\r\n\
+content-length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    let named = tokio::task::spawn_blocking(move || raw_request(addr, request.as_bytes()))
+        .await
+        .expect("join");
+    assert!(
+        named.starts_with(b"HTTP/1.0 204"),
+        "{}",
+        String::from_utf8_lossy(&named)
+    );
+    assert_eq!(
+        std::fs::read_to_string(overlay.join("rabbits/0019db9c2815/name")).expect("name"),
+        "Garen\n"
+    );
+
+    let status = tokio::task::spawn_blocking(move || {
+        raw_request(addr, b"GET /_clapier/api/status HTTP/1.0\r\n\r\n")
+    })
+    .await
+    .expect("join");
+    let json = String::from_utf8_lossy(&status);
+    assert!(json.contains(r#""name":"Garen""#), "status: {json}");
 }
 
 #[tokio::test]

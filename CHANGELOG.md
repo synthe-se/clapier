@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A new web app for the burrow (`web/`, Svelte 5 + Bits UI, French and
+  English through Paraglide), in Maison's and Ariane's design language
+  with Clapier's own violet. One screen: every rabbit as a tile (its
+  state in words, uptime, Wi-Fi, ears, sound, dance, a live avatar whose
+  ears follow the real ones), its gestures (ping, salute, hush, reboot
+  behind a confirmation, the .chor library, composing a choreography,
+  colour, ears, speech), and the request journal. Light and dark themes,
+  phone to wide screen. Built with bun, embedded into the binary at build
+  time: still one file to deploy.
+- Rabbits have names: set from the web app, kept in their burrow
+  (`overlay/rabbits/<mac>/name`).
+- Clapier's brand: a Nabaztag at the door of its burrow, its belly LEDs
+  lit.
+- A JSON API under `/_clapier/api` (`status`, `ctl`, `dance`, `say`,
+  `name`); refusals carry a stable code the web app words itself.
+
+### Changed
+
+- The status and pilot HTML pages are replaced by the web app;
+  `/_clapier/pilot` still opens it. The web app is served under a strict
+  Content-Security-Policy, its hashed assets cached for good.
+- Every dependency to its latest; Rust 1.99 is the declared minimum.
+- CI and the release build the web app before the server.
+
 ## [0.2.0] - 2026-08-15
 
 ### Added

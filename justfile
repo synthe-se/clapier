@@ -3,15 +3,24 @@
 default:
     @just --list
 
-# Build the server workspace, release profile
-build:
+# The web app (embedded into the server at build time)
+web:
+    cd web && bun install && bun run build
+
+# Build the web app, then the server workspace, release profile
+build: web
     cargo build --release
 
-# Exactly what CI checks: format, lints, tests
+# Exactly what CI checks: format, lints, tests, the web app's checks and tests
 check:
     cargo fmt --check
     cargo clippy --all-targets -- -D warnings
     cargo test
+    cd web && bun run check && bun run test
+
+# The web app with hot reload on :5173, against a running burrow (CLAPIER=http://pi to look at the Pi's)
+web-dev:
+    cd web && bun run dev
 
 # Licenses, advisories and dependency sources
 deny:
@@ -34,8 +43,13 @@ deploy mac:
     ./scripts/deploy-garenne.sh --rabbit {{mac}}
 
 # Serve the local overlay on :8080 (no root needed) for a quick look
-serve:
+serve: web
     cargo run --release -p clapier -- --bind 0.0.0.0:8080 --overlay garenne/overlay
+
+# Cross-build for the Raspberry Pi 1 and deploy it there (PI_HOST=root@192.168.1.103)
+pi:
+    ./scripts/build-rpi1.sh
+    ./scripts/deploy-pi.sh
 
 # Make the rabbit speak (builds nothing; wants pocket-tts built once)
 say text:

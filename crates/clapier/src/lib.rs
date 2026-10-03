@@ -12,11 +12,11 @@ use std::{
 };
 
 use axum::{
-    Router,
+    Json, Router,
     body::Body,
-    extract::{ConnectInfo, Form, Query, State},
-    http::{Method, Uri, header},
-    response::{Html, Redirect, Response},
+    extract::{ConnectInfo, Path, State},
+    http::{Method, StatusCode, Uri, header},
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use clapier_fleet::Fleet;
@@ -89,6 +89,34 @@ impl AppState {
     }
 }
 
+/// A name fits on a tile: a word or two, no control characters.
+pub const NAME_MAX: usize = 32;
+
+/// The rabbit's name, kept in its burrow (`rabbits/<mac>/name`) so it
+/// travels with the overlay like everything else about the rabbit.
+fn name_path(overlay: &std::path::Path, mac: &str) -> PathBuf {
+    overlay.join("rabbits").join(mac).join("name")
+}
+
+fn read_name(overlay: &std::path::Path, mac: &str) -> Option<String> {
+    let text = std::fs::read_to_string(name_path(overlay, mac)).ok()?;
+    let name = text.lines().next()?.trim();
+    (!name.is_empty()).then(|| name.chars().take(NAME_MAX).collect())
+}
+
+/// A name as typed, made fit to keep: trimmed, one line, bounded. Empty
+/// means "forget the name".
+pub fn vet_name(raw: &str) -> Result<String, &'static str> {
+    let name = raw.trim();
+    if name.chars().count() > NAME_MAX {
+        return Err("name_length");
+    }
+    if name.chars().any(char::is_control) {
+        return Err("name_chars");
+    }
+    Ok(name.to_string())
+}
+
 /// Ask a rabbit its `/status` page, in its own dialect: HTTP/1.0, read
 /// until the connection closes.
 async fn fetch_status(ip: IpAddr) -> anyhow::Result<String> {
@@ -140,21 +168,44 @@ pub async fn ctl_send(ip: IpAddr, cmd: &str) -> anyhow::Result<String> {
     Ok(String::from_utf8_lossy(&buf[..n]).into_owned())
 }
 
-/// The pilot page's gate: only commands a button should reach, with
-/// their arguments bounded. The volume floor is not a style choice:
-/// below 40 the amplifier's draw has already crashed a supply and
-/// wedged the radio.
-pub fn vet_ctl(cmd: &str) -> Result<String, String> {
+/// Why the gate refused a command. The web app words each one itself
+/// (`code` is the contract), in the person's language.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Refusal {
+    Empty,
+    VolFloor,
+    VolNumber,
+    Ears,
+    NotAllowed,
+}
+
+impl Refusal {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Refusal::Empty => "cmd_empty",
+            Refusal::VolFloor => "vol_floor",
+            Refusal::VolNumber => "vol_number",
+            Refusal::Ears => "ears_range",
+            Refusal::NotAllowed => "cmd_not_allowed",
+        }
+    }
+}
+
+/// The pilot's gate: only commands a button should reach, with their
+/// arguments bounded. The volume floor is not a style choice: below 40
+/// the amplifier's draw has already crashed a supply and wedged the
+/// radio.
+pub fn vet_ctl(cmd: &str) -> Result<String, Refusal> {
     let words: Vec<&str> = cmd.split_whitespace().collect();
     match words.as_slice() {
-        [] => Err("empty command".to_string()),
+        [] => Err(Refusal::Empty),
         [verb @ ("ping" | "dance" | "reboot" | "stop" | "conf" | "heap" | "fetch")] => {
             Ok((*verb).to_string())
         }
         ["vol", n] => match n.parse::<u32>() {
             Ok(n) if (40..=254).contains(&n) => Ok(format!("vol {n}")),
-            Ok(_) => Err("vol stays at 40 or above, the supply remembers".to_string()),
-            Err(_) => Err("vol wants a number".to_string()),
+            Ok(_) => Err(Refusal::VolFloor),
+            Err(_) => Err(Refusal::VolNumber),
         },
         ["color", c] if c.len() == 6 && c.chars().all(|ch| ch.is_ascii_hexdigit()) => {
             Ok(format!("color {c}"))
@@ -169,14 +220,14 @@ pub fn vet_ctl(cmd: &str) -> Result<String, String> {
         }
         ["ears", a, b] => match (a.parse::<u32>(), b.parse::<u32>()) {
             (Ok(a), Ok(b)) if a <= 16 && b <= 16 => Ok(format!("ears {a} {b}")),
-            _ => Err("ears wants two positions in 0..16".to_string()),
+            _ => Err(Refusal::Ears),
         },
         [verb @ ("chor" | "play"), path]
             if path.starts_with("/vl/") && !path.contains("..") && path.len() < 128 =>
         {
             Ok(format!("{verb} {path}"))
         }
-        _ => Err(format!("command not allowed: {cmd}")),
+        _ => Err(Refusal::NotAllowed),
     }
 }
 
@@ -206,8 +257,8 @@ mod tests {
 
     #[test]
     fn the_gate_remembers_the_supply() {
-        assert!(vet_ctl("vol 39").is_err());
-        assert!(vet_ctl("vol 0").is_err());
+        assert_eq!(vet_ctl("vol 39"), Err(Refusal::VolFloor));
+        assert_eq!(vet_ctl("vol 0"), Err(Refusal::VolFloor));
     }
 
     #[test]
@@ -222,18 +273,20 @@ mod tests {
     }
 
     #[test]
+    fn names_are_one_short_line() {
+        assert_eq!(vet_name("  Garen \n"), Ok("Garen".to_string()));
+        assert_eq!(vet_name(""), Ok(String::new()));
+        assert_eq!(vet_name("Ga\tren"), Err("name_chars"));
+        assert_eq!(vet_name(&"a".repeat(33)), Err("name_length"));
+    }
+
+    #[test]
     fn macs_are_twelve_lowercase_hex() {
         assert!(mac_ok("0019db9c2815"));
         assert!(!mac_ok("0019DB9C2815"));
         assert!(!mac_ok("0019db9c28"));
         assert!(!mac_ok("0019db9c28xy"));
     }
-}
-
-fn pilot_redirect(msg: &str) -> Redirect {
-    use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
-    let encoded = utf8_percent_encode(msg, NON_ALPHANUMERIC).to_string();
-    Redirect::to(&format!("/_clapier/pilot?m={encoded}"))
 }
 
 /// The log channel is shared: the ad-hoc listener scripts want the same
@@ -315,14 +368,54 @@ pub async fn listen_pulses(app: Arc<AppState>, port: u16) {
 
 pub fn router(app: Arc<AppState>) -> Router {
     Router::new()
-        .route("/_clapier", get(status_page))
+        .route("/_clapier", get(web_shell))
+        .route("/_clapier/", get(web_shell))
+        // The old pilot page's address stays a way in.
+        .route("/_clapier/pilot", get(web_shell))
         .route("/_clapier/health", get(|| async { "ok" }))
-        .route("/_clapier/pilot", get(pilot_page))
-        .route("/_clapier/ctl", post(ctl_post))
-        .route("/_clapier/dance", post(dance_post))
-        .route("/_clapier/say", post(say_post))
+        .route("/_clapier/api/status", get(api_status))
+        .route("/_clapier/api/ctl", post(api_ctl))
+        .route("/_clapier/api/dance", post(api_dance))
+        .route("/_clapier/api/say", post(api_say))
+        .route("/_clapier/api/name", post(api_name))
+        .route("/_clapier/{*path}", get(web_asset))
         .fallback(serve_content)
         .with_state(app)
+}
+
+/// The web app's policy: our own scripts only (the theme is read before
+/// first paint by a file, not an inline script), inline styles allowed
+/// for the floating menus' positions, nothing framed, nothing sent away.
+const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
+img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; \
+base-uri 'none'; form-action 'self'; object-src 'none'";
+
+fn web_response(asset: pages::Asset) -> Response {
+    let cache = if asset.immutable {
+        "public, max-age=31536000, immutable"
+    } else {
+        // the shell names the current build's files: always asked again
+        "no-cache"
+    };
+    Response::builder()
+        .header(header::CONTENT_TYPE, asset.mime)
+        .header(header::CACHE_CONTROL, cache)
+        .header(header::CONTENT_SECURITY_POLICY, CSP)
+        .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+        .header(header::REFERRER_POLICY, "no-referrer")
+        .body(Body::from(asset.bytes))
+        .expect("static response")
+}
+
+async fn web_shell() -> Response {
+    web_response(pages::index())
+}
+
+async fn web_asset(Path(path): Path<String>) -> Response {
+    match pages::asset(&path) {
+        Some(asset) if path != "index.html" => web_response(asset),
+        _ => (StatusCode::NOT_FOUND, "not found").into_response(),
+    }
 }
 
 /// Every .chor the overlay can serve, as the /vl paths the rabbits ask.
@@ -361,130 +454,198 @@ async fn chor_library(app: &AppState) -> Vec<String> {
     out
 }
 
-#[derive(serde::Deserialize)]
-pub struct PilotQuery {
-    m: Option<String>,
+/// A refusal the web app words itself: a stable `code`, sometimes a
+/// technical `detail` (the encoder's reason) shown as is.
+pub struct ApiError {
+    status: StatusCode,
+    code: &'static str,
+    detail: Option<String>,
 }
 
-async fn pilot_page(State(app): State<Arc<AppState>>, Query(q): Query<PilotQuery>) -> Html<String> {
-    let rabbits: Vec<pages::PilotRabbit> = app
-        .fleet
-        .snapshot()
-        .into_iter()
-        .filter_map(|r| {
-            let mac = r.mac?;
-            let state = r.status.as_ref().map_or_else(String::new, |s| {
-                let mut parts = Vec::new();
-                if let Some(rssi) = s.rssi {
-                    parts.push(format!("rssi {rssi}"));
-                }
-                if let Some(ears) = &s.ears {
-                    parts.push(format!("ears {ears}"));
-                }
-                if let Some(audio) = &s.audio {
-                    parts.push(format!("audio {audio}"));
-                }
-                if let Some(choreo) = &s.choreo {
-                    parts.push(format!("choreo {choreo}"));
-                }
-                parts.join(" - ")
-            });
-            Some(pages::PilotRabbit {
-                mac,
-                ip: r.ip.to_string(),
-                state,
-            })
-        })
-        .collect();
-    let chors = chor_library(&app).await;
-    Html(pages::render_pilot(
-        &rabbits,
-        &chors,
-        q.m.as_deref(),
-        app.say_script.is_some(),
-    ))
+impl ApiError {
+    fn new(status: StatusCode, code: &'static str) -> Self {
+        Self {
+            status,
+            code,
+            detail: None,
+        }
+    }
+}
+
+impl From<Refusal> for ApiError {
+    fn from(refusal: Refusal) -> Self {
+        Self::new(StatusCode::UNPROCESSABLE_ENTITY, refusal.code())
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        #[derive(serde::Serialize)]
+        struct Body {
+            code: &'static str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            detail: Option<String>,
+        }
+        let body = Body {
+            code: self.code,
+            detail: self.detail,
+        };
+        (self.status, Json(body)).into_response()
+    }
+}
+
+/// What the rabbit said back.
+#[derive(serde::Serialize)]
+pub struct Reply {
+    reply: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bytes: Option<usize>,
+}
+
+/// An IP the fleet knows, or a refusal: the pilot never aims the radio
+/// at an address it was handed.
+fn known_rabbit(app: &AppState, ip: &str) -> Result<IpAddr, ApiError> {
+    let ip: IpAddr = ip
+        .parse()
+        .map_err(|_| ApiError::new(StatusCode::BAD_REQUEST, "bad_ip"))?;
+    if !app.fleet.snapshot().iter().any(|r| r.ip == ip) {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "unknown_rabbit"));
+    }
+    Ok(ip)
 }
 
 #[derive(serde::Deserialize)]
-pub struct CtlForm {
+pub struct CtlRequest {
     ip: String,
     cmd: String,
 }
 
-async fn ctl_post(State(app): State<Arc<AppState>>, Form(form): Form<CtlForm>) -> Redirect {
-    let Ok(ip) = form.ip.parse::<IpAddr>() else {
-        return pilot_redirect("bad ip");
-    };
-    if !app.fleet.snapshot().iter().any(|r| r.ip == ip) {
-        return pilot_redirect("that ip is not a rabbit the fleet knows");
-    }
-    match vet_ctl(&form.cmd) {
-        Err(reason) => pilot_redirect(&reason),
-        Ok(cmd) => match ctl_send(ip, &cmd).await {
-            Ok(reply) => pilot_redirect(&reply),
-            Err(_) => pilot_redirect("no reply (rebooting, dancing hard, or asleep)"),
-        },
+async fn api_ctl(
+    State(app): State<Arc<AppState>>,
+    Json(req): Json<CtlRequest>,
+) -> Result<Json<Reply>, ApiError> {
+    let ip = known_rabbit(&app, &req.ip)?;
+    let cmd = vet_ctl(&req.cmd)?;
+    match ctl_send(ip, &cmd).await {
+        Ok(reply) => Ok(Json(Reply {
+            reply: Some(reply),
+            bytes: None,
+        })),
+        Err(_) => Err(ApiError::new(StatusCode::GATEWAY_TIMEOUT, "no_reply")),
     }
 }
 
 #[derive(serde::Deserialize)]
-pub struct DanceForm {
+pub struct DanceRequest {
     mac: String,
     ip: String,
     cdl: String,
 }
 
-async fn dance_post(State(app): State<Arc<AppState>>, Form(form): Form<DanceForm>) -> Redirect {
-    if !mac_ok(&form.mac) {
-        return pilot_redirect("bad mac");
+async fn api_dance(
+    State(app): State<Arc<AppState>>,
+    Json(req): Json<DanceRequest>,
+) -> Result<Json<Reply>, ApiError> {
+    if !mac_ok(&req.mac) {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "bad_mac"));
     }
-    let Ok(ip) = form.ip.parse::<IpAddr>() else {
-        return pilot_redirect("bad ip");
-    };
+    let ip = known_rabbit(&app, &req.ip)?;
     let Some(overlay) = app.tree.overlay.clone() else {
-        return pilot_redirect("no overlay to write into");
+        return Err(ApiError::new(StatusCode::CONFLICT, "no_overlay"));
     };
-    match clapier_chor::encode_cdl(&form.cdl) {
-        Err(reason) => pilot_redirect(&format!("choreography rejected: {reason}")),
-        Ok(bytes) => {
-            let dir = overlay.join("rabbits").join(&form.mac).join("vl/chor");
-            let tmp = dir.join(".pilot.chor.tmp");
-            let dest = dir.join("pilot.chor");
-            let written = async {
-                tokio::fs::create_dir_all(&dir).await?;
-                tokio::fs::write(&tmp, &bytes).await?;
-                tokio::fs::rename(&tmp, &dest).await
-            }
-            .await;
-            if written.is_err() {
-                return pilot_redirect("could not install the choreography");
-            }
-            match ctl_send(ip, "chor /vl/chor/pilot.chor").await {
-                Ok(reply) => pilot_redirect(&format!("{} bytes installed, {reply}", bytes.len())),
-                Err(_) => pilot_redirect("installed, but the rabbit did not answer"),
-            }
-        }
+    let bytes = clapier_chor::encode_cdl(&req.cdl).map_err(|reason| ApiError {
+        detail: Some(reason.to_string()),
+        ..ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "chor_rejected")
+    })?;
+    let dir = overlay.join("rabbits").join(&req.mac).join("vl/chor");
+    let tmp = dir.join(".pilot.chor.tmp");
+    let dest = dir.join("pilot.chor");
+    let written = async {
+        tokio::fs::create_dir_all(&dir).await?;
+        tokio::fs::write(&tmp, &bytes).await?;
+        tokio::fs::rename(&tmp, &dest).await
     }
+    .await;
+    if written.is_err() {
+        return Err(ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "install_failed",
+        ));
+    }
+    // Installed either way; a silent rabbit is said, not failed.
+    let reply = ctl_send(ip, "chor /vl/chor/pilot.chor").await.ok();
+    Ok(Json(Reply {
+        reply,
+        bytes: Some(bytes.len()),
+    }))
 }
 
 #[derive(serde::Deserialize)]
-pub struct SayForm {
+pub struct NameRequest {
+    mac: String,
+    name: String,
+}
+
+async fn api_name(
+    State(app): State<Arc<AppState>>,
+    Json(req): Json<NameRequest>,
+) -> Result<StatusCode, ApiError> {
+    if !mac_ok(&req.mac) {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "bad_mac"));
+    }
+    let name = vet_name(&req.name)
+        .map_err(|code| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, code))?;
+    let Some(overlay) = app.tree.overlay.clone() else {
+        return Err(ApiError::new(StatusCode::CONFLICT, "no_overlay"));
+    };
+    let path = name_path(&overlay, &req.mac);
+    let written = if name.is_empty() {
+        match tokio::fs::remove_file(&path).await {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
+    } else {
+        let dir = path.parent().expect("name has a burrow").to_path_buf();
+        let tmp = dir.join(".name.tmp");
+        async {
+            tokio::fs::create_dir_all(&dir).await?;
+            tokio::fs::write(&tmp, format!("{name}\n")).await?;
+            tokio::fs::rename(&tmp, &path).await
+        }
+        .await
+    };
+    written
+        .map(|()| StatusCode::NO_CONTENT)
+        .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "name_failed"))
+}
+
+#[derive(serde::Deserialize)]
+pub struct SayRequest {
     text: String,
 }
 
-async fn say_post(State(app): State<Arc<AppState>>, Form(form): Form<SayForm>) -> Redirect {
+async fn api_say(
+    State(app): State<Arc<AppState>>,
+    Json(req): Json<SayRequest>,
+) -> Result<StatusCode, ApiError> {
     let Some(script) = app.say_script.clone() else {
-        return pilot_redirect("speech not configured: start clapier with --say-script");
+        return Err(ApiError::new(StatusCode::CONFLICT, "say_off"));
     };
-    let text = form.text.trim().to_string();
-    if text.is_empty() || text.len() > 300 {
-        return pilot_redirect("a sentence, not a silence nor a novel (300 chars max)");
+    let text = req.text.trim().to_string();
+    if text.is_empty() || text.chars().count() > 300 {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "say_length",
+        ));
     }
     // Generation takes tens of seconds on the TTS model; fire and
     // forget, the rabbit will start speaking when the MP3 lands.
     match tokio::process::Command::new(&script).arg(&text).spawn() {
-        Ok(_) => pilot_redirect("Estelle is thinking, she speaks in a few seconds"),
-        Err(_) => pilot_redirect("could not start the speech pipeline"),
+        Ok(_) => Ok(StatusCode::ACCEPTED),
+        Err(_) => Err(ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "say_failed",
+        )),
     }
 }
 
@@ -543,48 +704,111 @@ fn record(app: &AppState, peer: IpAddr, method: Method, uri: &Uri, resp: &Respon
     });
 }
 
-async fn status_page(State(app): State<Arc<AppState>>) -> Html<String> {
-    let snapshot = app.journal.snapshot();
-    let rabbit = match app.rabbit {
-        None => pages::Rabbit::NotConfigured,
-        Some(ip) => match snapshot.iter().rev().find(|h| h.peer == ip) {
-            Some(hit) => pages::Rabbit::Seen(ip.to_string(), hit.at.elapsed()),
-            None => pages::Rabbit::NotSeen(ip.to_string()),
-        },
-    };
-    let fleet: Vec<pages::FleetRow> = app
-        .fleet
-        .snapshot()
-        .iter()
-        .map(|r| pages::FleetRow {
-            mac: r.mac.clone().unwrap_or_else(|| "?".to_string()),
-            ip: r.ip.to_string(),
-            version: r
-                .pulse
-                .as_ref()
-                .map_or("-".to_string(), |p| p.version.clone()),
-            last_boot: r.last_boot.map(|at| at.elapsed()),
-            last_pulse: r.last_pulse.map(|at| at.elapsed()),
-            uptime: r
-                .pulse
-                .as_ref()
-                .map(|p| std::time::Duration::from_secs(p.uptime_s)),
-            link: r.pulse.as_ref().map(|p| p.link),
-            rssi: r.status.as_ref().and_then(|s| s.rssi),
-            audio: r.status.as_ref().and_then(|s| s.audio.clone()),
-            choreo: r.status.as_ref().and_then(|s| s.choreo.clone()),
-        })
-        .collect();
-    let rows: Vec<pages::Row> = snapshot
+/// Everything the web app shows, in one answer: it asks every few
+/// seconds while it is looked at.
+#[derive(serde::Serialize)]
+pub struct StatusView {
+    version: &'static str,
+    uptime_s: u64,
+    serving: String,
+    /// The `--rabbit` IP, and how long ago it last asked anything.
+    tagged: Option<Tagged>,
+    say: bool,
+    rabbits: Vec<RabbitView>,
+    chors: Vec<String>,
+    journal: Vec<HitView>,
+}
+
+#[derive(serde::Serialize)]
+pub struct Tagged {
+    ip: String,
+    seen_s: Option<u64>,
+}
+
+/// One rabbit as the wire showed it; ages in seconds, `None` for what
+/// it has not said yet.
+#[derive(serde::Serialize)]
+pub struct RabbitView {
+    mac: Option<String>,
+    /// What the person called it; `None` until named.
+    name: Option<String>,
+    ip: String,
+    version: Option<String>,
+    boot_s: Option<u64>,
+    pulse_s: Option<u64>,
+    status_s: Option<u64>,
+    uptime_s: Option<u64>,
+    link: Option<u8>,
+    rssi: Option<i64>,
+    ears: Option<String>,
+    audio: Option<String>,
+    choreo: Option<String>,
+    reassoc: Option<u64>,
+    tcp_retx: Option<u64>,
+}
+
+#[derive(serde::Serialize)]
+pub struct HitView {
+    ago_ms: u64,
+    peer: String,
+    method: String,
+    uri: String,
+    status: u16,
+    bytes: usize,
+    /// The peer is a rabbit of the fleet (or the `--rabbit` one).
+    rabbit: bool,
+}
+
+async fn api_status(State(app): State<Arc<AppState>>) -> Json<StatusView> {
+    let journal = app.journal.snapshot();
+    let fleet = app.fleet.snapshot();
+    let age = |at: Option<Instant>| at.map(|at| at.elapsed().as_secs());
+    let tagged = app.rabbit.map(|ip| Tagged {
+        ip: ip.to_string(),
+        seen_s: journal
+            .iter()
+            .rev()
+            .find(|h| h.peer == ip)
+            .map(|h| h.at.elapsed().as_secs()),
+    });
+    let is_rabbit = |peer: IpAddr| Some(peer) == app.rabbit || fleet.iter().any(|r| r.ip == peer);
+    let journal = journal
         .iter()
         .rev()
-        .map(|hit| pages::Row {
-            ago: hit.at.elapsed(),
+        .map(|hit| HitView {
+            ago_ms: u64::try_from(hit.at.elapsed().as_millis()).unwrap_or(u64::MAX),
             peer: hit.peer.to_string(),
-            request: format!("{} {}", hit.method, hit.uri),
+            method: hit.method.to_string(),
+            uri: hit.uri.clone(),
             status: hit.status.as_u16(),
             bytes: hit.bytes,
-            rabbit: Some(hit.peer) == app.rabbit,
+            rabbit: is_rabbit(hit.peer),
+        })
+        .collect();
+    let rabbits = fleet
+        .iter()
+        .map(|r| {
+            let status = r.status.as_ref();
+            RabbitView {
+                mac: r.mac.clone(),
+                name: match (&app.tree.overlay, &r.mac) {
+                    (Some(overlay), Some(mac)) => read_name(overlay, mac),
+                    _ => None,
+                },
+                ip: r.ip.to_string(),
+                version: r.pulse.as_ref().map(|p| p.version.clone()),
+                boot_s: age(r.last_boot),
+                pulse_s: age(r.last_pulse),
+                status_s: age(r.last_status),
+                uptime_s: r.pulse.as_ref().map(|p| p.uptime_s),
+                link: r.pulse.as_ref().map(|p| p.link),
+                rssi: status.and_then(|s| s.rssi),
+                ears: status.and_then(|s| s.ears.clone()),
+                audio: status.and_then(|s| s.audio.clone()),
+                choreo: status.and_then(|s| s.choreo.clone()),
+                reassoc: status.and_then(|s| s.reassoc),
+                tcp_retx: status.and_then(|s| s.tcp_retx),
+            }
         })
         .collect();
     let serving = match (&app.tree.base, &app.tree.overlay) {
@@ -595,11 +819,14 @@ async fn status_page(State(app): State<Arc<AppState>>) -> Html<String> {
         (None, Some(overlay)) => format!("overlay {}", overlay.display()),
         (None, None) => "nothing (empty tree)".to_string(),
     };
-    Html(pages::render_status(
-        app.started.elapsed(),
-        &serving,
-        &rabbit,
-        &fleet,
-        &rows,
-    ))
+    Json(StatusView {
+        version: env!("CARGO_PKG_VERSION"),
+        uptime_s: app.started.elapsed().as_secs(),
+        serving,
+        tagged,
+        say: app.say_script.is_some(),
+        rabbits,
+        chors: chor_library(&app).await,
+        journal,
+    })
 }
