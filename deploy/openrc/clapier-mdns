@@ -1,0 +1,42 @@
+#!/sbin/openrc-run
+
+name="clapier-mdns"
+description="Clapier - answers clapier.local on the LAN (an avahi alias for this host)"
+
+# One avahi-publish per global address, IPv4 and IPv6 (a name with no AAAA makes dual-stack
+# clients wait seconds for it), each without a reverse record: the addresses' PTR belong to
+# the host's own name, and avahi calls a second one a collision. The addresses are read at
+# each start: nothing is written down by hand.
+NAME=clapier.local
+RUN=/run/clapier-mdns
+
+depend() {
+    need avahi-daemon
+    after net
+}
+
+start() {
+    ebegin "Publishing ${NAME}"
+    mkdir -p "${RUN}"
+    rm -f "${RUN}"/*.pid
+    n=0
+    for ip in $(ip -o addr show scope global | awk '$3 == "inet" || $3 == "inet6" { split($4, a, "/"); print a[1] }'); do
+        n=$((n + 1))
+        start-stop-daemon --start --background --make-pidfile --pidfile "${RUN}/${n}.pid" \
+            --user clapier --exec /usr/bin/avahi-publish -- -a -R "${NAME}" "${ip}"
+    done
+    [ "${n}" -gt 0 ]
+    eend $? "no global address to publish"
+}
+
+stop() {
+    ebegin "Withdrawing ${NAME}"
+    for pid in "${RUN}"/*.pid; do
+        [ -f "${pid}" ] && start-stop-daemon --stop --pidfile "${pid}" && rm -f "${pid}"
+    done
+    eend 0
+}
+
+status() {
+    ls "${RUN}"/*.pid >/dev/null 2>&1 && einfo "status: started" || { einfo "status: stopped"; return 3; }
+}

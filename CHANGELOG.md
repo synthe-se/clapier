@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`overlay/rabbits/<mac>/name`).
 - Clapier's brand: a Nabaztag at the door of its burrow, its belly LEDs
   lit.
+- On the Pi, `http://clapier.local/`: `deploy-pi.sh` installs avahi and a
+  `clapier-mdns` OpenRC service publishing the alias (IPv4 and IPv6,
+  read at each start).
 - A JSON API under `/_clapier/api` (`status`, `ctl`, `dance`, `say`,
   `name`); refusals carry a stable code the web app words itself.
 

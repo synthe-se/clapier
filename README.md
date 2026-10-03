@@ -47,7 +47,8 @@ $ ./target/release/clapier --bind 0.0.0.0:8080 --overlay garenne/overlay
 ```
 
 Or `just serve`. On a Raspberry Pi 1 (Alpine/OpenRC):
-`PI_HOST=root@<pi> just pi` cross-builds and installs the service.
+`PI_HOST=root@<pi> just pi` cross-builds and installs the service,
+which then answers at `http://clapier.local/` (mDNS through avahi).
 `./garenne/build.sh test` runs the rabbit's golden suite,
 `./garenne/build.sh` builds its brain. Speech (`--say-script`,
 `just say "Bonjour."`) wants [pocket-tts](vendor/pocket-tts) built once.
