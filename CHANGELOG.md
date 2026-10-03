@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redirect there. The web app is served under a strict
   Content-Security-Policy, its hashed assets cached for good.
 - Every dependency to its latest; Rust 1.99 is the declared minimum.
+- pocket-tts follows Kyutai upstream to 3.3.0 (41cbc84): retrained
+  models and voices, the French default temperature drops to 0.3, so the
+  rabbit's voice changes a little (`--temp 0.7` brings the old warmth
+  back); its dependencies to their latest too.
 - CI and the release build the web app before the server.
 - A shorter README, with a screenshot.
 
