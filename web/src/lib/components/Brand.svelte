@@ -2,7 +2,7 @@
 	import { m } from '#lib/paraglide/messages.js';
 </script>
 
-<a class="brand" href={import.meta.env.BASE_URL} aria-label={m.brand_name()}>
+<a class="brand" href="/" aria-label={m.brand_name()}>
 	<img src="{import.meta.env.BASE_URL}brand.svg" alt="" width="28" height="28" />
 	<span class="name" aria-hidden="true">{m.brand_name()}</span>
 </a>

@@ -16,7 +16,7 @@ use axum::{
     body::Body,
     extract::{ConnectInfo, Path, State},
     http::{Method, StatusCode, Uri, header},
-    response::{IntoResponse, Response},
+    response::{IntoResponse, Redirect, Response},
     routing::{get, post},
 };
 use clapier_fleet::Fleet;
@@ -368,10 +368,16 @@ pub async fn listen_pulses(app: Arc<AppState>, port: u16) {
 
 pub fn router(app: Arc<AppState>) -> Router {
     Router::new()
-        .route("/_clapier", get(web_shell))
-        .route("/_clapier/", get(web_shell))
-        // The old pilot page's address stays a way in.
-        .route("/_clapier/pilot", get(web_shell))
+        // The web app lives at the root: rabbits only ever ask under /vl.
+        // Its files and API stay under /_clapier, out of the rabbits' way;
+        // the old addresses lead home.
+        .route("/", get(web_shell))
+        .route("/_clapier", get(|| async { Redirect::permanent("/") }))
+        .route("/_clapier/", get(|| async { Redirect::permanent("/") }))
+        .route(
+            "/_clapier/pilot",
+            get(|| async { Redirect::permanent("/") }),
+        )
         .route("/_clapier/health", get(|| async { "ok" }))
         .route("/_clapier/api/status", get(api_status))
         .route("/_clapier/api/ctl", post(api_ctl))

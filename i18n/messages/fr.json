@@ -23,8 +23,6 @@
 	"rabbits_title": "Les lapins",
 	"rabbits_empty": "Aucun lapin entendu pour l’instant",
 	"rabbits_empty_hint": "Un démarrage suffit : dès qu’un lapin demande son bytecode ou pulse sur le réseau, il apparaît ici.",
-	"tagged_seen": "{ip} vu {ago}",
-	"tagged_unseen": "{ip} pas encore vu",
 	"rabbit_unnamed": "Lapin sans nom",
 	"rabbit_no_mac": "adresse MAC inconnue",
 	"rabbit_no_mac_hint": "Entendu sur le réseau, pas encore nommé : ses gestes arrivent dès sa prochaine requête au terrier.",

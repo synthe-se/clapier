@@ -51,11 +51,6 @@
 			<section aria-labelledby="rabbits-title" class="section">
 				<div class="group-head">
 					<h2 class="group-title" id="rabbits-title">{m.rabbits_title()}</h2>
-					{#if s.tagged}
-						<span class="fact">
-							{s.tagged.seen_s === null ? m.tagged_unseen({ ip: s.tagged.ip }) : m.tagged_seen({ ip: s.tagged.ip, ago: ago(s.tagged.seen_s) })}
-						</span>
-					{/if}
 				</div>
 				{#if rabbits.length}
 					<div class="tiles">

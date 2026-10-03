@@ -23,8 +23,6 @@
 	"rabbits_title": "The rabbits",
 	"rabbits_empty": "No rabbit heard yet",
 	"rabbits_empty_hint": "One boot is enough: as soon as a rabbit asks for its bytecode or pulses on the network, it shows up here.",
-	"tagged_seen": "{ip} seen {ago}",
-	"tagged_unseen": "{ip} not seen yet",
 	"rabbit_unnamed": "Nameless rabbit",
 	"rabbit_no_mac": "MAC address unknown",
 	"rabbit_no_mac_hint": "Heard on the network, not named yet: its gestures arrive with its next request to the burrow.",

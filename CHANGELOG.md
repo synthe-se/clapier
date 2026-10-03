@@ -27,11 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The status and pilot HTML pages are replaced by the web app;
-  `/_clapier/pilot` still opens it. The web app is served under a strict
+- The status and pilot HTML pages are replaced by the web app, served at
+  the root (`http://<server>/`); `/_clapier` and `/_clapier/pilot`
+  redirect there. The web app is served under a strict
   Content-Security-Policy, its hashed assets cached for good.
 - Every dependency to its latest; Rust 1.99 is the declared minimum.
 - CI and the release build the web app before the server.
+- A shorter README, with a screenshot.
 
 ## [0.2.0] - 2026-08-15
 

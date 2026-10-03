@@ -3,7 +3,7 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { defineConfig } from 'vitest/config';
 
 // One screen, no routes: plain Svelte. The build is embedded into the clapier binary
-// (crates/clapier-pages/build.rs) and served under /_clapier/.
+// (crates/clapier-pages/build.rs): the page at /, its files and API under /_clapier/.
 export default defineConfig({
 	base: '/_clapier/',
 	plugins: [

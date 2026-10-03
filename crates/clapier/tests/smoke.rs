@@ -219,15 +219,21 @@ async fn the_web_app_stands_and_the_pilot_guards() {
     std::fs::create_dir(dir.path().join("vl")).expect("mkdir vl");
 
     let addr = spawn_server(dir.path().to_path_buf()).await;
+    let page = tokio::task::spawn_blocking(move || raw_request(addr, b"GET / HTTP/1.0\r\n\r\n"))
+        .await
+        .expect("join");
+    let text = String::from_utf8_lossy(&page).to_ascii_lowercase();
+    assert!(text.starts_with("http/1.0 200"), "{text}");
+    assert!(text.contains("content-security-policy:"), "{text}");
+    assert!(text.contains("<!doctype html>"), "{text}");
     for path in ["/_clapier", "/_clapier/", "/_clapier/pilot"] {
         let request = format!("GET {path} HTTP/1.0\r\n\r\n");
-        let page = tokio::task::spawn_blocking(move || raw_request(addr, request.as_bytes()))
+        let moved = tokio::task::spawn_blocking(move || raw_request(addr, request.as_bytes()))
             .await
             .expect("join");
-        let text = String::from_utf8_lossy(&page).to_ascii_lowercase();
-        assert!(text.starts_with("http/1.0 200"), "{path}: {text}");
-        assert!(text.contains("content-security-policy:"), "{path}: {text}");
-        assert!(text.contains("<!doctype html>"), "{path}: {text}");
+        let text = String::from_utf8_lossy(&moved).to_ascii_lowercase();
+        assert!(text.starts_with("http/1.0 308"), "{path}: {text}");
+        assert!(text.contains("location: /\r\n"), "{path}: {text}");
     }
 
     let missing = tokio::task::spawn_blocking(move || {
