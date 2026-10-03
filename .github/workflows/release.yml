@@ -161,10 +161,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # the archives and the bytecode only: the web app already rides inside each server
       - uses: actions/download-artifact@v8
         with:
+          pattern: server-*
           path: artifacts
           merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: garenne
+          path: artifacts
       - name: firmware from the latest uplg/nabgcc release
         env:
           GH_TOKEN: ${{ github.token }}
