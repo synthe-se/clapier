@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Every dependency to its latest (Paraglide JS 3 for the web app);
+  Rust 1.100 is the declared minimum. TypeScript stays on 6:
+  svelte-check does not take 7 yet.
+- CI runs the web app's tests on Node 26.
+
 ## [0.3.0] - 2026-10-03
 
 ### Added
