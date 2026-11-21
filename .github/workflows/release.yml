@@ -40,7 +40,7 @@ jobs:
       # vitest runs under Node; the app's formats want Intl.DurationFormat (Node 23+)
       - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 26
       - run: bun install --frozen-lockfile
       - run: bun run check
       - run: bun run test
