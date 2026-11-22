@@ -120,7 +120,30 @@ fun _t_quiet n = if n <= 0 then nil else 5 :: (_t_quiet (n - 1));;
 fun _t_append a b = if a == nil then b else (hd a) :: (_t_append (tl a) b);;
 fun _t_cat4 a b c d = _t_append a (_t_append b (_t_append c d));;
 
+// What the first rabbit heard while its person clapped twice: a room
+// humming at 500-1700, a clap that rings over three blocks with a dip
+// in the middle, 880 ms, a second clap.
+fun _t_heard =
+    _t_append (700 :: 936 :: 493 :: 974 :: 10730 :: 3956 :: 6370 :: 177 :: nil)
+    (_t_append (0 :: 0 :: 0 :: 0 :: 0 :: 0 :: 0 :: 0 :: 0 :: 0 :: 2532 :: 9354 :: nil)
+               (0 :: 0 :: 0 :: 0 :: 0 :: 0 :: nil));;
+
+// The same room with nobody clapping: its hum and its spikes.
+fun _t_hum =
+    1748 :: 1120 :: 798 :: 986 :: 3887 :: 1889 :: 885 :: 793 :: 568 :: 2369 :: 443 :: 316 :: 0 ::
+    541 :: 507 :: 630 :: 1241 :: 3504 :: 1227 :: 694 :: 983 :: 633 :: 1304 :: 541 :: 1403 :: 2712 :: nil;;
+
+fun _t_claps_in_a_room =
+    clap_reset;
+    t_int "the claps it really heard" (_t_room _t_heard 0) 1;
+    clap_reset;
+    t_int "the room it really sat in" (_t_room (_t_append _t_hum _t_hum) 0) 0;
+    0;;
+
 fun _t_claps =
+    _t_claps_in_a_room;
+    // the rest in a small, quiet scale
+    set mic_min = 40;
     // quiet, clap, 300 ms, clap, quiet
     clap_reset;
     t_int "two claps are one double clap"
@@ -149,6 +172,8 @@ fun _t_claps =
     t_int "a clap must rise above the room"
         (_t_room (_t_cat4 (30 :: 30 :: 30 :: 30 :: 30 :: 30 :: 30 :: 30 :: 30 :: 30 :: 30 :: 30 :: nil)
                   (80 :: 30 :: 30 :: 30 :: nil) (80 :: 30 :: 30 :: nil) nil) 0) 0;
+    set mic_min = 5000;
+    clap_reset;
     0;;
 
 fun _t_decide =

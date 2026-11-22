@@ -18,17 +18,24 @@ const MIC_FREQ = 8000;;
 const MIC_BLOCK = 256;;
 const MIC_TICK_MS = 300;;
 const MIC_GC_TICKS = 20;;        // a collection every 6 s while listening
+const MIC_TRACE_MIN = 2000;;     // debug 2 keeps the blocks louder than this
 
 // A clap, counted in blocks of 63 ms.
-const CLAP_MAX_BLOCKS = 3;;      // louder for longer is not a clap
+const CLAP_MAX_BLOCKS = 4;;      // louder for longer is not a clap
 const CLAP_QUIET_BEFORE = 2;;    // it comes out of quiet
-const CLAP_GAP_MIN = 2;;         // second clap: 125 ms after the first, at least
-const CLAP_GAP_MAX = 12;;        // and 760 ms at most
+// The second clap: 190 ms after the first ended at least (a clap rings,
+// and its echo a block later is not a second clap), a second at most.
+const CLAP_GAP_MIN = 3;;
+const CLAP_GAP_MAX = 16;;
 const CLAP_HOLD = 24;;           // then deaf for 1.5 s: one double clap, one event
 
 var mic_wanted = 0;;     // listening was asked for
 var mic_gain = 16384;;   // the codec's input gain, 1024 is unity, 0 its own AGC
-var mic_min = 40;;       // a block quieter than this is never loud
+// A block quieter than this is never loud. Measured on the first
+// rabbit, at the gain above: a clap at one or two metres reads 9000 to
+// 11000, while the room it sat in hummed at 500-1700 with spikes to
+// 3900.
+var mic_min = 5000;;
 var mic_debug = 0;;      // log the levels heard, to tune the two above
 var stat_claps = 0;;     // double claps heard since boot
 var clap_cb = nil;;      // fun [] _, fired on a double clap
@@ -55,16 +62,21 @@ fun clap_reset =
 
 // Loud is well above the room, and above the floor of what counts.
 fun _clap_threshold =
-    let _clap_floor * 4 -> t in if t > mic_min then t else mic_min;;
+    let _clap_floor * 6 -> t in if t > mic_min then t else mic_min;;
 
 // A burst of n loud blocks just ended. Returns 1 when it completes a
 // double clap.
 fun _clap_burst n =
-    if (n > CLAP_MAX_BLOCKS) || (_clap_before < CLAP_QUIET_BEFORE) then
-        // a long noise, or one that did not come out of quiet: not a
-        // clap, and whatever was pending is spoiled
+    if n > CLAP_MAX_BLOCKS then
+        // a long noise is not a clap, and whatever was pending is spoiled
         (set _clap_since = nil; 0)
-    else if (_clap_since != nil) && (_clap_since >= CLAP_GAP_MIN) then
+    else if (_clap_since != nil) && (_clap_since < CLAP_GAP_MIN) then
+        // the first clap still ringing: part of it, not a second one
+        (set _clap_since = 0; 0)
+    else if _clap_before < CLAP_QUIET_BEFORE then
+        // it did not come out of quiet
+        (set _clap_since = nil; 0)
+    else if _clap_since != nil then
         (set _clap_since = nil; set _clap_hold = CLAP_HOLD; 1)
     else (set _clap_since = 0; 0);;
 
@@ -117,7 +129,7 @@ fun _mic_blocks s off =
     (
         if v > _mic_peak then (set _mic_peak = v; 0) else 0;
         set _mic_block = _mic_block + 1;
-        if (mic_debug >= 2) && (v > mic_min) && ((strlen _mic_trace) < 420) then
+        if (mic_debug >= 2) && (v > MIC_TRACE_MIN) && ((strlen _mic_trace) < 420) then
             (set _mic_trace = strcatlist _mic_trace :: (itoa _mic_block) :: ":" :: (itoa v) :: " " :: nil; 0)
         else 0;
         if clap_step v then _mic_clapped else 0;

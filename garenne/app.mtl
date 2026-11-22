@@ -63,6 +63,20 @@ fun _garenne_audio_state playing =
         0
     );;
 
+// Two claps heard: the two side LEDs of the belly flash white, so the
+// person knows before anything else answers. The middle one is left to
+// whoever paints it (Maison keeps the day's Tempo colour there).
+fun _garenne_clap_done task =
+    led LED_BODY_LEFT RGB_BLACK;
+    led LED_BODY_RIGHT RGB_BLACK;
+    TaskStop;;
+
+fun _garenne_clap =
+    led LED_BODY_LEFT 0xffffff;
+    led LED_BODY_RIGHT 0xffffff;
+    task_start_ex "clap" 700 #_garenne_clap_done;
+    0;;
+
 fun garenne_init =
     set garenne_boot_s = time;
     // The base LED breathes in our color: the rabbit is alive and ours.
@@ -74,6 +88,7 @@ fun garenne_init =
     set button_cb = #_garenne_button;
     set ears_moved_cb = #_garenne_ear_moved;
     set audio_state_cb = #_garenne_audio_state;
+    set clap_cb = #_garenne_clap;
     ears_init;
     button_init;
     choreo_init;
