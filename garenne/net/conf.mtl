@@ -66,14 +66,59 @@ fun _quad h =
     if (q0 == nil) || (q1 == nil) || (q2 == nil) || (q3 == nil) then nil
     else strcatlist (ctoa q0) :: (ctoa q1) :: (ctoa q2) :: (ctoa q3) :: nil;;
 
-// The server field's host part as a 4-byte IP when it is a dotted quad
-// (our LAN case); nil when it is a hostname - we have no DNS and no
-// need for one yet. The real EEPROM carries "ip:port/path", so the
-// host stops at '/' or ':'.
-fun conf_server_ip s =
-    let conf_server s -> url in
+// A server URL in the config sector's shape, "ip[:port][/path]". The
+// pieces are pure so the tests feed them strings.
+fun _url_hostport url =
     let strfind url 0 "/" 0 nil -> sl in
-    let if (sl == nil) || (sl < 0) then url else strsub url 0 sl -> hostport in
+    if (sl == nil) || (sl < 0) then url else strsub url 0 sl;;
+
+// The host part as a 4-byte IP when it is a dotted quad (our LAN case);
+// nil when it is a hostname - we have no DNS and no need for one yet.
+fun url_ip url =
+    let _url_hostport url -> hostport in
     let strfind hostport 0 ":" 0 nil -> co in
     let if (co == nil) || (co < 0) then hostport else strsub hostport 0 co -> host in
     _quad host;;
+
+// The port, 80 when the URL names none, nil when it is not a port.
+fun url_port url =
+    let _url_hostport url -> hostport in
+    let strfind hostport 0 ":" 0 nil -> co in
+    if (co == nil) || (co < 0) then 80
+    else let strlen hostport -> n in
+    if ((n - co) < 2) || ((n - co) > 6) || !(_quad_digits hostport (co + 1) n) then nil
+    else let atoi (strsub hostport (co + 1) (n - co - 1)) -> v in
+    if (v < 1) || (v > 65535) then nil else v;;
+
+// The path with its leading slash, "" when the URL has none. The boot
+// appends "/bc.jsp" to the whole URL, so does whoever probes it.
+fun url_path url =
+    let strfind url 0 "/" 0 nil -> sl in
+    if (sl == nil) || (sl < 0) then "" else strsub url sl ((strlen url) - sl);;
+
+fun conf_server_ip s = url_ip (conf_server s);;
+
+// The boot keeps the URL NUL terminated in its 41 bytes.
+const CONF_SERVER_LEN = 41;;
+const _CONF_NULS = "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";;
+
+// The server field as it goes into the sector: the URL NUL padded to
+// 41 bytes, or nil when garenne could not find its way back from it
+// (no dotted quad, bad port, too long for the field).
+fun conf_server_field url =
+    let strlen url -> n in
+    if (n < 7) || (n >= CONF_SERVER_LEN) then nil
+    else if ((url_ip url) == nil) || ((url_port url) == nil) then nil
+    else strcat url (strsub _CONF_NULS 0 (CONF_SERVER_LEN - n));;
+
+// Rewrites the server field alone: sysSave patches the bytes it is
+// given into the sector and leaves the rest (SSID, PMK) as it was.
+// Returns 1 when the sector reads back with the new URL.
+fun conf_server_write url =
+    let conf_server_field url -> field in
+    if field == nil then 0
+    else
+    (
+        save field 0 "conf.bin" CONF_OFF_SERVER CONF_SERVER_LEN;
+        if !strcmp (conf_server conf_read) url then 1 else 0
+    );;

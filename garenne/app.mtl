@@ -64,7 +64,7 @@ fun _garenne_audio_state playing =
     );;
 
 fun garenne_init =
-    set garenne_boot_ms = time_ms;
+    set garenne_boot_s = time;
     // The base LED breathes in our color: the rabbit is alive and ours.
     set leds_breath_color = GARENNE_COLOR;
     set leds_breathing = 1;

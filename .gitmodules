@@ -1,3 +1,0 @@
-[submodule "vendor/pocket-tts"]
-	path = vendor/pocket-tts
-	url = https://github.com/synthe-se/pocket-tts

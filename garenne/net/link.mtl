@@ -169,7 +169,8 @@ fun link_conf_summary =
         " magic=" :: (itoa (conf_magic _link_conf)) ::
         " srv=" :: (conf_server _link_conf) ::
         " srvip=" :: (let conf_server_ip _link_conf -> sip in
-                      if sip == nil then "-" else ip_str sip) :: nil;;
+                      if sip == nil then "-" else ip_str sip) ::
+        " fw=" :: env_firmware :: nil;;
 
 fun link_init =
     set _link_conf = conf_read;

@@ -47,6 +47,70 @@ fun _t_server =
     );
     0;;
 
+fun _t_url =
+    t_eq "url ip" (url_ip "192.168.1.10/vl") "\$C0\$A8\$01\$0A";
+    t_int "url default port" (url_port "192.168.1.10/vl") 80;
+    t_int "url named port" (url_port "192.168.1.10:8080/vl/") 8080;
+    t_true "url bad port" ((url_port "192.168.1.10:http/vl") == nil);
+    t_true "url empty port" ((url_port "192.168.1.10:/vl") == nil);
+    t_true "url port zero" ((url_port "192.168.1.10:0/vl") == nil);
+    t_eq "url path" (url_path "192.168.1.10/vl") "/vl";
+    t_eq "url path keeps its slash" (url_path "192.168.1.103:80/vl/") "/vl/";
+    t_eq "url no path" (url_path "10.0.0.1") "";
+    let conf_server_field "192.168.1.10/vl" -> f in
+    (
+        t_int "server field length" (strlen f) CONF_SERVER_LEN;
+        t_eq "server field reads back" (conf_server f) "192.168.1.10/vl";
+        t_int "server field is NUL padded" (strget f 40) 0
+    );
+    t_true "server field refuses a hostname" ((conf_server_field "r.nabaztag.com/vl") == nil);
+    t_true "server field refuses a bad port" ((conf_server_field "10.0.0.1:x/vl") == nil);
+    t_true "server field refuses 41 chars"
+        ((conf_server_field "192.168.100.100:8080/a/very/long/path/vl/") == nil);
+    t_int "server field takes 40 chars"
+        (strlen (conf_server_field "192.168.100.100:8080/a/very/long/path/vl")) CONF_SERVER_LEN;
+    0;;
+
+fun _t_firmware =
+    t_eq "env signed by the boot"
+        (env_firmware_of (strcat (_t_rep "\0" 20) "NABGaae9e4cc")) "aae9e4cc";
+    t_eq "env of an older boot" (env_firmware_of (_t_rep "\0" 64)) "?";
+    t_eq "env too short to be signed" (env_firmware_of "NABGaae9e4cc") "?";
+    0;;
+
+fun _t_fw =
+    // Adler-32("Wikipedia") = 0x11E60398.
+    let fw_adler "Wikipedia" -> [a b] in
+    (
+        t_int "adler low half" a 0x0398;
+        t_int "adler high half" b 0x11E6
+    );
+    let fw_adler (_t_rep "\$FF" 6000) -> [a b] in
+    (
+        // Long enough for both halves to wrap many times.
+        t_int "adler low wraps" a 23018;
+        t_int "adler high wraps" b 42135
+    );
+    let strcat (_t_rep "\$18\$F0\$9F\$E5" 5) (_t_rep "\0" 12) -> v in
+    (
+        t_true "vectors of a firmware" (fw_vectors_ok v);
+        t_true "vectors too short" (!(fw_vectors_ok (strsub v 0 20)));
+        t_true "vectors of noise" (!(fw_vectors_ok (_t_rep "x" 64)))
+    );
+    let fw_args "/vl/fw/nab.bin 106744 11e60398" -> [path len a b] in
+    (
+        t_eq "fw path" path "/vl/fw/nab.bin";
+        t_int "fw len" len 106744;
+        t_int "fw sum low" a 0x0398;
+        t_int "fw sum high" b 0x11E6
+    );
+    t_true "fw refuses a foreign path" ((fw_args "/etc/nab.bin 106744 11e60398") == nil);
+    t_true "fw refuses past the config sector" ((fw_args "/vl/fw/nab.bin 126977 11e60398") == nil);
+    t_true "fw refuses a tiny image" ((fw_args "/vl/fw/nab.bin 100 11e60398") == nil);
+    t_true "fw refuses a short sum" ((fw_args "/vl/fw/nab.bin 106744 398") == nil);
+    t_true "fw refuses missing args" ((fw_args "/vl/fw/nab.bin") == nil);
+    0;;
+
 fun _t_decide =
     t_int "up and chatty" (link_decide 4 1000 nil 0) LINK_ACT_NONE;
     t_int "quiet lan probes" (link_decide 4 40000 nil 0) LINK_ACT_PROBE;
@@ -125,6 +189,9 @@ fun _t_reassoc =
 fun t_link =
     _t_conf;
     _t_server;
+    _t_url;
+    _t_firmware;
+    _t_fw;
     _t_decide;
     _t_take;
     _t_arp_age;

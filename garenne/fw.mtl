@@ -1,0 +1,159 @@
+// Flashing the firmware over the network the rabbit already lives on,
+// no config mode and no access point: fetch the raw image from clapier,
+// prove it is the one that was meant, hand it to the firmware's own
+// flash routine.
+//
+// There is no bootloader behind a flash: a wrong byte written is a
+// JTAG session. So nothing is written unless ALL of this holds: the
+// transfer ended on HTTP 200, exactly the announced number of bytes
+// arrived, they open on the ARM vectors every firmware carries, they
+// fit below the config sector, and their Adler-32 is the one the
+// sender computed from the file it meant to send. `fwcheck` runs the
+// same road and stops before the write: try it first.
+//
+// The image streams straight into one preallocated string (no chunk
+// list, no second copy), and the checksum is computed in slices so the
+// scheduler keeps breathing.
+
+const FW_MIN = 0x1000;;
+const FW_MAX = 0x1F000;;         // the config sector starts here
+const FW_SLICE = 2048;;          // bytes summed per scheduler turn
+const FW_ADLER_MOD = 65521;;
+
+// The flashFirmware native demands these two keys (vinterp.c).
+const FW_KEY1 = 0x13FB6754;;
+const FW_KEY2 = 0x0407FE58;;
+
+var _fw_buf = nil;;     // the image being received; nil when idle
+var _fw_len = 0;;       // bytes announced
+var _fw_got = 0;;       // bytes received
+var _fw_want_a = 0;;    // announced Adler-32, low half
+var _fw_want_b = 0;;    // announced Adler-32, high half
+var _fw_commit = 0;;    // 1: flash once verified; 0: check only
+var _fw_a = 1;;
+var _fw_b = 0;;
+var _fw_pos = 0;;
+
+// The last outcome, kept for the status page: the log channel is one
+// unrepeated broadcast, and this is not a verdict to miss.
+var fw_last = "idle";;
+
+// Adler-32 over s[i..j), carried in _fw_a/_fw_b. Two 16-bit halves on
+// purpose: the VM's integers are 31 bits wide.
+fun _fw_adler_slice s i j =
+    for k = i; k < j; k + 1 do
+    (
+        set _fw_a = _fw_a + (strget s k);
+        if _fw_a >= FW_ADLER_MOD then set _fw_a = _fw_a - FW_ADLER_MOD else 0;
+        set _fw_b = _fw_b + _fw_a;
+        if _fw_b >= FW_ADLER_MOD then set _fw_b = _fw_b - FW_ADLER_MOD else 0
+    );
+    0;;
+
+// Whole-string Adler-32 as [low high], for the tests.
+fun fw_adler s =
+    set _fw_a = 1;
+    set _fw_b = 0;
+    _fw_adler_slice s 0 (strlen s);
+    [_fw_a _fw_b];;
+
+fun _fw_vector_ok s i =
+    ((strget s ((4 * i) + 3)) == 0xE5) && ((strget s ((4 * i) + 2)) == 0x9F)
+        && (((strget s ((4 * i) + 1)) & 0xF0) == 0xF0);;
+
+// Reset, undef, swi, prefetch abort, data abort: five "ldr pc, [pc, #n]".
+fun fw_vectors_ok s =
+    ((strlen s) >= 32) && (_fw_vector_ok s 0) && (_fw_vector_ok s 1)
+        && (_fw_vector_ok s 2) && (_fw_vector_ok s 3) && (_fw_vector_ok s 4);;
+
+// "PATH LEN SUM" -> [path len sum_low sum_high], nil unless the path is
+// clapier's, the length a firmware's and the sum 8 hex digits.
+fun fw_args args =
+    let strfind args 0 " " 0 nil -> s1 in
+    if (s1 == nil) || (s1 <= 0) then nil
+    else let strfind args (s1 + 1) " " 0 nil -> s2 in
+    if (s2 == nil) || (s2 <= (s1 + 1)) then nil
+    else let strsub args 0 s1 -> path in
+    let atoi (strsub args (s1 + 1) (s2 - s1 - 1)) -> len in
+    let strsub args (s2 + 1) ((strlen args) - s2 - 1) -> sum in
+    if ((strlen path) < 5) || (vstrcmp path 0 "/vl/" 0 4) then nil
+    else if (len < FW_MIN) || (len > FW_MAX) then nil
+    else if (strlen sum) != 8 then nil
+    else [path len (htoi (strsub sum 4 4)) (htoi (strsub sum 0 4))];;
+
+fun _fw_end msg =
+    set _fw_buf = nil;
+    set fw_last = msg;
+    log_send (strcat "fw: " msg);
+    0;;
+
+fun _fw_flash_task task =
+    flashFirmware _fw_buf FW_KEY1 FW_KEY2;
+    // Only reached if the firmware refused the image.
+    _fw_end "the firmware refused the image, nothing written";
+    TaskStop;;
+
+fun _fw_sum_task task =
+    let _fw_pos + FW_SLICE -> next in
+    let if next > _fw_len then _fw_len else next -> stop in
+    (
+        _fw_adler_slice _fw_buf _fw_pos stop;
+        set _fw_pos = stop;
+        if stop < _fw_len then TaskRun
+        else if (_fw_a != _fw_want_a) || (_fw_b != _fw_want_b) then
+            (_fw_end "checksum mismatch, nothing written"; TaskStop)
+        else if !_fw_commit then
+            (_fw_end (strcatlist "verified " :: (itoa _fw_len) :: " bytes, check only, nothing written" :: nil); TaskStop)
+        else
+        (
+            log_send (strcatlist "fw: verified " :: (itoa _fw_len) :: " bytes, FLASHING - do not unplug" :: nil);
+            // Deferred so that line leaves the radio first.
+            task_start_ex "fwflash" 500 #_fw_flash_task;
+            TaskStop
+        )
+    );;
+
+fun _fw_chunk data =
+    let strlen data -> n in
+    (
+        if (_fw_buf != nil) && ((_fw_got + n) <= _fw_len) then (strcpy _fw_buf _fw_got data 0 n; 0) else 0;
+        set _fw_got = _fw_got + n;
+        0
+    );;
+
+fun _fw_done status =
+    if _fw_buf == nil then 0
+    else if status != 200 then _fw_end (strcatlist "http " :: (itoa status) :: ", nothing written" :: nil)
+    else if _fw_got != _fw_len then
+        _fw_end (strcatlist "got " :: (itoa _fw_got) :: " of " :: (itoa _fw_len) :: " bytes, nothing written" :: nil)
+    else if !(fw_vectors_ok _fw_buf) then _fw_end "not a firmware image, nothing written"
+    else
+    (
+        set _fw_a = 1;
+        set _fw_b = 0;
+        set _fw_pos = 0;
+        task_start_ex "fwsum" 20 #_fw_sum_task;
+        0
+    );;
+
+// Returns the reply for the control channel.
+fun fw_start args commit =
+    if _fw_buf != nil then "err fw busy"
+    else let fw_args args -> parsed in
+    if parsed == nil then "err fw /vl/PATH LEN ADLER32"
+    else let parsed -> [path len want_a want_b] in
+    (
+        audio_stop;
+        gc;
+        set _fw_len = len;
+        set _fw_got = 0;
+        set _fw_want_a = want_a;
+        set _fw_want_b = want_b;
+        set _fw_commit = commit;
+        set _fw_buf = strnew len;
+        set fw_last = strcat "fetching " path;
+        http_stream CLAPIER_IP 80
+            (strcatlist path :: "?m=" :: (mac_str net_mac) :: nil)
+            #_fw_chunk #_fw_done;
+        if commit then "ok fw fetching, will flash if verified" else "ok fw fetching, check only"
+    );;

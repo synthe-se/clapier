@@ -1,7 +1,8 @@
 // The remote handle: a tiny UDP command port. LAN-only by nature,
-// gated by a magic cookie, and the worst it can do on purpose is
-// reboot - which is also the recovery path. Drive it with
-// scripts/garenne-ctl.py.
+// gated by a magic cookie. Its two heavy levers are reboot - which is
+// also the recovery path - and server, which rewrites where the rabbit
+// fetches its bytecode, but only towards a clapier that proved it
+// serves one.
 
 const CTL_PORT = 9998;;
 const CTL_MAGIC = "grn1 ";;
@@ -31,6 +32,56 @@ fun _ctl_chor_done status body =
         log_send (strcatlist "chor: " :: (itoa n) :: " steps" :: nil)
     )
     else log_send (strcat "chor: http " (itoa status));;
+
+// Moving to another clapier without the config portal. The candidate
+// must serve this rabbit its bytecode first: the body of
+// URL/bc.jsp?m=MAC, the very fetch the boot will make, has to open on
+// the "amber" frame. Only then is the sector's server field rewritten
+// and the rabbit rebooted onto its new home. A wrong URL changes
+// nothing; the outcome lands on the log channel.
+var _ctl_srv_url = nil;;    // candidate being probed, nil when idle
+var _ctl_srv_head = "";;    // first body bytes of its answer
+
+fun _ctl_srv_chunk data =
+    if (strlen _ctl_srv_head) < 5 then
+    (
+        set _ctl_srv_head = strcat _ctl_srv_head
+            (strsub data 0 (if (strlen data) > 5 then 5 else strlen data));
+        0
+    )
+    else 0;;
+
+fun _ctl_srv_done status =
+    let _ctl_srv_url -> url in
+    (
+        set _ctl_srv_url = nil;
+        if (status != 200) || ((strlen _ctl_srv_head) < 5)
+            || (vstrcmp _ctl_srv_head 0 "amber" 0 5) then
+            log_send (strcatlist
+                "server: " :: url :: " serves no bytecode (http " ::
+                (itoa status) :: "), unchanged" :: nil)
+        else if !(conf_server_write url) then
+            log_send "server: the sector did not take the write, not rebooting"
+        else
+        (
+            log_send (strcat "server: saved, rebooting onto " url);
+            reboot_soon
+        )
+    );;
+
+fun _ctl_server frame macsrc url =
+    if _ctl_srv_url != nil then _ctl_reply frame macsrc "err server probe running"
+    else if (conf_server_field url) == nil then
+        _ctl_reply frame macsrc "err server IP[:PORT][/PATH], 40 chars at most"
+    else
+    (
+        set _ctl_srv_url = url;
+        set _ctl_srv_head = "";
+        http_stream (url_ip url) (url_port url)
+            (strcatlist (url_path url) :: "/bc.jsp?m=" :: (mac_str net_mac) :: nil)
+            #_ctl_srv_chunk #_ctl_srv_done;
+        _ctl_reply frame macsrc "ok probing server"
+    );;
 
 fun _ctl_run frame macsrc cmd =
     if !strcmp cmd "ping" then
@@ -115,6 +166,12 @@ fun _ctl_run frame macsrc cmd =
         _aud_hw_vol audio_vol;
         _ctl_reply frame macsrc "ok vol"
     )
+    else if ((strlen cmd) > 7) && (!vstrcmp cmd 0 "server " 0 7) then
+        _ctl_server frame macsrc (strsub cmd 7 ((strlen cmd) - 7))
+    else if ((strlen cmd) > 8) && (!vstrcmp cmd 0 "fwcheck " 0 8) then
+        _ctl_reply frame macsrc (fw_start (strsub cmd 8 ((strlen cmd) - 8)) 0)
+    else if ((strlen cmd) > 3) && (!vstrcmp cmd 0 "fw " 0 3) then
+        _ctl_reply frame macsrc (fw_start (strsub cmd 3 ((strlen cmd) - 3)) 1)
     else if ((strlen cmd) == 5) && (!vstrcmp cmd 0 "log " 0 4) then
     (
         set log_enabled = atoi (strsub cmd 4 1);

@@ -52,6 +52,8 @@ fun _hsrv_task_names l =
 fun _hsrv_status_body =
     strcatlist
         "garenne=" :: GARENNE_VERSION ::
+        "\13\10firmware=" :: env_firmware ::
+        "\13\10fw_last=" :: fw_last ::
         "\13\10uptime_s=" :: (itoa garenne_uptime_s) ::
         "\13\10link=" :: (itoa netState) ::
         "\13\10rssi=" :: (itoa netRssi) ::
