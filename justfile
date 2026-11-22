@@ -51,10 +51,6 @@ pi:
     ./scripts/build-rpi1.sh
     ./scripts/deploy-pi.sh
 
-# Make the rabbit speak (builds nothing; wants pocket-tts built once)
-say text:
-    ./scripts/rabbit-say.sh "{{text}}"
-
 # Cut a release: clean tree, bump, tag, push; CI builds and publishes
 release version:
     #!/usr/bin/env bash
