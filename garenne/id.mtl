@@ -1,6 +1,6 @@
 // Who we are. Included early so every module can state it.
 
-const GARENNE_VERSION = "0.14.0";;
+const GARENNE_VERSION = "0.15.0";;
 
 var garenne_boot_s = 0;;
 

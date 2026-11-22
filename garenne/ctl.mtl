@@ -172,6 +172,28 @@ fun _ctl_run frame macsrc cmd =
         _ctl_reply frame macsrc (fw_start (strsub cmd 8 ((strlen cmd) - 8)) 0)
     else if ((strlen cmd) > 3) && (!vstrcmp cmd 0 "fw " 0 3) then
         _ctl_reply frame macsrc (fw_start (strsub cmd 3 ((strlen cmd) - 3)) 1)
+    else if ((strlen cmd) > 4) && (!vstrcmp cmd 0 "mic " 0 4) then
+    (
+        // mic 0|1: stop or start listening for claps. mic gain N, mic
+        // min N, mic debug 0|1: the tuning, on a rabbit that is running.
+        let strsub cmd 4 ((strlen cmd) - 4) -> args in
+        (
+            if !vstrcmp args 0 "gain " 0 5 then
+                (set mic_gain = atoi (strsub args 5 ((strlen args) - 5)); mic_pause; 0)
+            else if !vstrcmp args 0 "min " 0 4 then
+                (set mic_min = atoi (strsub args 4 ((strlen args) - 4)); 0)
+            else if !vstrcmp args 0 "debug " 0 6 then
+                (set mic_debug = atoi (strsub args 6 1); 0)
+            else if !vstrcmp args 0 "gc " 0 3 then
+                (set mic_gc = atoi (strsub args 3 1); 0)
+            else if !strcmp args "trace" then 0
+            else (set mic_wanted = atoi (strsub args 0 1); 0);
+            if !strcmp args "trace" then _ctl_reply frame macsrc mic_trace
+            else _ctl_reply frame macsrc (strcatlist
+                "ok mic " :: mic_status :: " gain=" :: (itoa mic_gain) ::
+                " min=" :: (itoa mic_min) :: nil)
+        )
+    )
     else if ((strlen cmd) == 5) && (!vstrcmp cmd 0 "log " 0 4) then
     (
         set log_enabled = atoi (strsub cmd 4 1);

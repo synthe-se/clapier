@@ -66,6 +66,8 @@ fun _aud_set_state s =
     );;
 
 proto _aud_cb 1;;
+// The microphone and the codec's output exclude each other (mic.mtl).
+proto mic_pause 0;;
 
 #ifdef SIMU
 fun _aud_hw_start = 0;;
@@ -121,6 +123,7 @@ fun _aud_cb free =
     );;
 
 fun _aud_start_codec =
+    mic_pause;
     _aud_set_state AUD_PLAY;
     _aud_hw_vol audio_vol;
     _aud_hw_start;

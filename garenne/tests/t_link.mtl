@@ -111,6 +111,46 @@ fun _t_fw =
     t_true "fw refuses missing args" ((fw_args "/vl/fw/nab.bin") == nil);
     0;;
 
+// A room, block by block: returns how many double claps were heard.
+fun _t_room l n =
+    if l == nil then n
+    else _t_room (tl l) (n + (clap_step (hd l)));;
+
+fun _t_quiet n = if n <= 0 then nil else 5 :: (_t_quiet (n - 1));;
+fun _t_append a b = if a == nil then b else (hd a) :: (_t_append (tl a) b);;
+fun _t_cat4 a b c d = _t_append a (_t_append b (_t_append c d));;
+
+fun _t_claps =
+    // quiet, clap, 300 ms, clap, quiet
+    clap_reset;
+    t_int "two claps are one double clap"
+        (_t_room (_t_cat4 (_t_quiet 10) (900 :: 200 :: nil)
+                  (_t_append (_t_quiet 4) (800 :: nil)) (_t_quiet 6)) 0) 1;
+    clap_reset;
+    t_int "one clap is nothing"
+        (_t_room (_t_cat4 (_t_quiet 10) (900 :: nil) (_t_quiet 20) nil) 0) 0;
+    clap_reset;
+    t_int "two claps too far apart are nothing"
+        (_t_room (_t_cat4 (_t_quiet 10) (900 :: nil)
+                  (_t_append (_t_quiet 16) (900 :: nil)) (_t_quiet 6)) 0) 0;
+    clap_reset;
+    t_int "a long noise is not a clap"
+        (_t_room (_t_cat4 (_t_quiet 10) (900 :: 900 :: 900 :: 900 :: 900 :: nil)
+                  (_t_append (_t_quiet 4) (900 :: nil)) (_t_quiet 6)) 0) 0;
+    clap_reset;
+    t_int "three claps are one event, then deaf for a moment"
+        (_t_room (_t_cat4 (_t_quiet 10) (900 :: nil)
+                  (_t_append (_t_quiet 4) (900 :: nil))
+                  (_t_append (_t_quiet 4) (_t_append (900 :: nil) (_t_quiet 6)))) 0) 1;
+    clap_reset;
+    t_int "a quiet room stays quiet" (_t_room (_t_quiet 60) 0) 0;
+    clap_reset;
+    // a room at 30 is quiet too: its floor rises, 80 is no longer loud
+    t_int "a clap must rise above the room"
+        (_t_room (_t_cat4 (30 :: 30 :: 30 :: 30 :: 30 :: 30 :: 30 :: 30 :: 30 :: 30 :: 30 :: 30 :: nil)
+                  (80 :: 30 :: 30 :: 30 :: nil) (80 :: 30 :: 30 :: nil) nil) 0) 0;
+    0;;
+
 fun _t_decide =
     t_int "up and chatty" (link_decide 4 1000 nil 0) LINK_ACT_NONE;
     t_int "quiet lan probes" (link_decide 4 40000 nil 0) LINK_ACT_PROBE;
@@ -192,6 +232,7 @@ fun t_link =
     _t_url;
     _t_firmware;
     _t_fw;
+    _t_claps;
     _t_decide;
     _t_take;
     _t_arp_age;

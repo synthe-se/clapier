@@ -1,0 +1,179 @@
+// The microphone, and the one thing asked of it so far: hearing two
+// claps.
+//
+// The codec records IMA ADPCM at 8 kHz and hands it over in 256-byte
+// blocks (505 samples, 63 ms each); the firmware's recVol decodes one
+// block and returns how loud it was. That is all the signal processing
+// a 32 MHz rabbit needs for a clap: a clap is a burst a block or two
+// long, out of a quiet room, and two of them a moment apart are a
+// double clap. Speech and music are long, so they are not claps.
+//
+// The codec cannot record and play at once (the firmware refuses
+// either while the other runs): the microphone steps aside when a
+// sound is about to play and comes back when the rabbit is quiet.
+// Every block is a fresh VM string, 4 KB a second: the task below
+// collects them long before the heap notices.
+
+const MIC_FREQ = 8000;;
+const MIC_BLOCK = 256;;
+const MIC_TICK_MS = 300;;
+const MIC_GC_TICKS = 20;;        // a collection every 6 s while listening
+
+// A clap, counted in blocks of 63 ms.
+const CLAP_MAX_BLOCKS = 3;;      // louder for longer is not a clap
+const CLAP_QUIET_BEFORE = 2;;    // it comes out of quiet
+const CLAP_GAP_MIN = 2;;         // second clap: 125 ms after the first, at least
+const CLAP_GAP_MAX = 12;;        // and 760 ms at most
+const CLAP_HOLD = 24;;           // then deaf for 1.5 s: one double clap, one event
+
+var mic_wanted = 0;;     // listening was asked for
+var mic_gain = 16384;;   // the codec's input gain, 1024 is unity, 0 its own AGC
+var mic_min = 40;;       // a block quieter than this is never loud
+var mic_debug = 0;;      // log the levels heard, to tune the two above
+var stat_claps = 0;;     // double claps heard since boot
+var clap_cb = nil;;      // fun [] _, fired on a double clap
+
+var _mic_on = 0;;        // the codec is recording
+var _mic_ticks = 0;;
+var _mic_peak = 0;;      // loudest block since the last debug line
+var _mic_block = 0;;     // blocks heard since listening began
+var _mic_trace = "";;    // debug 2: "block:level " of each loud block
+var mic_gc = 1;;         // collect while listening (off only to study the microphone)
+
+// The detector's state, all in blocks.
+var _clap_floor = 0;;    // how loud quiet is, smoothed
+var _clap_quiet = 0;;    // quiet blocks in a row
+var _clap_before = 0;;   // quiet blocks that preceded the burst under way
+var _clap_loud = 0;;     // loud blocks in a row (the burst under way)
+var _clap_since = nil;;  // blocks since the first clap ended; nil: none pending
+var _clap_hold = 0;;     // blocks left to stay deaf
+
+fun clap_reset =
+    set _clap_floor = 0; set _clap_quiet = 0; set _clap_before = 0;
+    set _clap_loud = 0; set _clap_since = nil; set _clap_hold = 0;
+    0;;
+
+// Loud is well above the room, and above the floor of what counts.
+fun _clap_threshold =
+    let _clap_floor * 4 -> t in if t > mic_min then t else mic_min;;
+
+// A burst of n loud blocks just ended. Returns 1 when it completes a
+// double clap.
+fun _clap_burst n =
+    if (n > CLAP_MAX_BLOCKS) || (_clap_before < CLAP_QUIET_BEFORE) then
+        // a long noise, or one that did not come out of quiet: not a
+        // clap, and whatever was pending is spoiled
+        (set _clap_since = nil; 0)
+    else if (_clap_since != nil) && (_clap_since >= CLAP_GAP_MIN) then
+        (set _clap_since = nil; set _clap_hold = CLAP_HOLD; 1)
+    else (set _clap_since = 0; 0);;
+
+// One block of loudness v. Pure in (v, the state above), so the tests
+// feed it rooms. Returns 1 on the block that completes a double clap.
+fun clap_step v =
+    if _clap_hold > 0 then (set _clap_hold = _clap_hold - 1; 0)
+    else
+    (
+        if _clap_since != nil then
+        (
+            set _clap_since = _clap_since + 1;
+            if _clap_since > CLAP_GAP_MAX then (set _clap_since = nil; 0) else 0
+        )
+        else 0;
+        if v > _clap_threshold then
+        (
+            if _clap_loud == 0 then (set _clap_before = _clap_quiet; 0) else 0;
+            set _clap_loud = _clap_loud + 1;
+            set _clap_quiet = 0;
+            0
+        )
+        else
+        (
+            set _clap_floor = ((_clap_floor * 7) + v) / 8;
+            set _clap_quiet = _clap_quiet + 1;
+            if _clap_loud == 0 then 0
+            else let _clap_loud -> n in (set _clap_loud = 0; _clap_burst n)
+        )
+    );;
+
+#ifdef SIMU
+fun _mic_hw_start cb = 0;;
+fun _mic_hw_stop = 0;;
+fun _mic_hw_vol s off = 0;;
+#else
+fun _mic_hw_start cb = recStart MIC_FREQ mic_gain cb;;
+fun _mic_hw_stop = recStop;;
+fun _mic_hw_vol s off = recVol s off;;
+#endif
+
+fun _mic_clapped =
+    set stat_claps = stat_claps + 1;
+    log_send (strcat "clap: double n=" (itoa stat_claps));
+    if clap_cb != nil then (call clap_cb []; 0) else 0;;
+
+fun _mic_blocks s off =
+    if (off + MIC_BLOCK) > (strlen s) then 0
+    else let _mic_hw_vol s off -> v in
+    (
+        if v > _mic_peak then (set _mic_peak = v; 0) else 0;
+        set _mic_block = _mic_block + 1;
+        if (mic_debug >= 2) && (v > mic_min) && ((strlen _mic_trace) < 420) then
+            (set _mic_trace = strcatlist _mic_trace :: (itoa _mic_block) :: ":" :: (itoa v) :: " " :: nil; 0)
+        else 0;
+        if clap_step v then _mic_clapped else 0;
+        _mic_blocks s (off + MIC_BLOCK)
+    );;
+
+fun _mic_cb s =
+    if s == nil then 0 else _mic_blocks s 0;;
+
+// Out of the codec's way: a sound is about to play.
+fun mic_pause =
+    if _mic_on then (_mic_hw_stop; set _mic_on = 0; 0) else 0;;
+
+fun _mic_task task =
+    if !mic_wanted then mic_pause
+    else if (!_mic_on) && (_aud_state == AUD_IDLE) then
+    (
+        clap_reset;
+        _mic_hw_start #_mic_cb;
+        set _mic_on = 1;
+        0
+    )
+    else 0;
+    if _mic_on then
+    (
+        set _mic_ticks = _mic_ticks + 1;
+        if _mic_ticks >= MIC_GC_TICKS then
+        (
+            set _mic_ticks = 0;
+            if mic_gc then (gc; 0) else 0;
+            if mic_debug == 1 then
+            (
+                log_send (strcatlist
+                    "mic: peak=" :: (itoa _mic_peak) :: " floor=" :: (itoa _clap_floor) ::
+                    " loud>" :: (itoa _clap_threshold) :: nil);
+                0
+            )
+            else 0;
+            set _mic_peak = 0;
+            0
+        )
+        else 0
+    )
+    else 0;
+    TaskRun;;
+
+// debug 2: the loud blocks since the last asking, then forgotten.
+fun mic_trace =
+    let strcatlist "@" :: (itoa _mic_block) :: " " :: _mic_trace :: nil -> t in
+    (set _mic_trace = ""; t);;
+
+fun mic_status =
+    strcatlist
+        (if _mic_on then "listening" else if mic_wanted then "waiting" else "off") ::
+        " claps=" :: (itoa stat_claps) :: nil;;
+
+fun mic_init =
+    task_start_ex "mic" MIC_TICK_MS #_mic_task;
+    0;;
