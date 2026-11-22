@@ -17,7 +17,8 @@
 
 	const s = $derived(live.status);
 	// a rabbit only heard pulsing before it named itself still counts once: by IP
-	const rabbits = $derived(s ? [...s.rabbits].sort((a, b) => Number(!a.mac) - Number(!b.mac) || a.ip.localeCompare(b.ip, undefined, { numeric: true })) : []);
+	// and a rabbit is listed once, whatever the burrow says: a repeated key would take the page down
+	const rabbits = $derived(s ? [...new Map(s.rabbits.map((r) => [r.mac ?? r.ip, r])).values()].sort((a, b) => Number(!a.mac) - Number(!b.mac) || a.ip.localeCompare(b.ip, undefined, { numeric: true })) : []);
 	const awake = $derived(rabbits.filter((r) => r.pulse_s !== null && r.pulse_s <= AWAKE_S).length);
 </script>
 
@@ -31,8 +32,7 @@
 				<ul class="door-facts">
 					<li><Icon name="rabbit" size={16} />{m.door_awake({ awake: num(awake), count: num(rabbits.length) })}</li>
 					<li><Icon name="clock" size={16} />{m.door_uptime({ uptime: duration(s.uptime_s) })}</li>
-					<li><Icon name="server" size={16} /><span class="mono">{s.serving}</span></li>
-					<li><span class="chip">clapier {s.version}</span></li>
+					<li><span class="chip" title={s.serving}>clapier {s.version}</span></li>
 				</ul>
 			{/if}
 		</div>
@@ -48,6 +48,7 @@
 		{/if}
 
 		{#if s}
+			<div class="cols">
 			<section aria-labelledby="rabbits-title" class="section">
 				<div class="group-head">
 					<h2 class="group-title" id="rabbits-title">{m.rabbits_title()}</h2>
@@ -55,7 +56,7 @@
 				{#if rabbits.length}
 					<div class="tiles">
 						{#each rabbits as r (r.mac ?? r.ip)}
-							<RabbitTile rabbit={r} chors={s.chors} say={s.say} />
+							<RabbitTile rabbit={r} chors={s.chors} firmwares={s.firmwares} />
 						{/each}
 					</div>
 				{:else}
@@ -66,9 +67,10 @@
 				{/if}
 			</section>
 
-			<section aria-labelledby="journal-title" class="section">
+			<section aria-labelledby="journal-title" class="section journal">
 				<Journal hits={s.journal} />
 			</section>
+			</div>
 		{:else if !live.lost}
 			<p class="muted loading">{m.loading()}</p>
 		{/if}
@@ -87,11 +89,17 @@
 	.door-inner { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s-2) var(--s-5); padding-block: var(--s-3); }
 	.door-facts { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-4); font: var(--t-secondary); }
 	.door-facts li { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-	.door-facts .mono { word-break: break-all; }
 	.door-facts .chip { background: rgb(255 255 255 / 16%); color: inherit; }
 
 	.body { display: grid; gap: var(--s-6); padding-top: var(--s-5); }
-	.section { display: grid; gap: var(--s-3); }
+	.section { display: grid; gap: var(--s-3); min-width: 0; }
+	/* the rabbits, then the journal: stacked on a phone, side by side once there is room, the
+	   journal a quieter column that follows the page */
+	.cols { display: grid; gap: var(--s-6); align-items: start; }
+	@media (min-width: 1100px) {
+		.cols { grid-template-columns: minmax(0, 1fr) minmax(20rem, 28rem); gap: var(--s-6); }
+		.journal { position: sticky; top: calc(56px + var(--s-4)); max-height: calc(100dvh - 56px - var(--s-5)); overflow: auto; }
+	}
 	.empty-title { font: var(--t-group); color: var(--ink); margin-bottom: var(--s-2); }
 	.loading { margin: 0; }
 </style>

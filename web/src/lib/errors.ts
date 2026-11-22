@@ -16,12 +16,15 @@ const WORDS: Record<string, () => string> = {
 	ears_range: m.error_ears_range,
 	no_overlay: m.error_no_overlay,
 	install_failed: m.error_install_failed,
-	say_off: m.error_say_off,
-	say_length: m.error_say_length,
-	say_failed: m.error_say_failed,
 	name_length: m.error_name_length,
 	name_chars: m.error_name_chars,
-	name_failed: m.error_name_failed
+	name_failed: m.error_name_failed,
+	fw_shape: m.error_fw_shape,
+	fw_size: m.error_fw_size,
+	fw_vectors: m.error_fw_vectors,
+	fw_name: m.error_fw_name,
+	fw_missing: m.error_fw_missing,
+	fw_keep_failed: m.error_fw_keep_failed
 };
 
 export function errorText(error: unknown): string {

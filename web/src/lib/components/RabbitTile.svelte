@@ -4,7 +4,7 @@
 	// nothing else. Every outcome is said once, in a toast and its live region.
 	import { Accordion, Slider } from 'bits-ui';
 	import { m } from '#lib/paraglide/messages.js';
-	import { api, type Rabbit } from '#lib/api.ts';
+	import { api, type Firmware, type Rabbit } from '#lib/api.ts';
 	import { ui } from '#lib/ui.svelte.ts';
 	import { ago, bytes, duration } from '#lib/i18n.svelte.ts';
 	import { AWAKE_S, earPose, ears as parseEars, mac as formatMac } from '#lib/format.ts';
@@ -17,9 +17,9 @@
 	interface Props {
 		rabbit: Rabbit;
 		chors: string[];
-		say: boolean;
+		firmwares: Firmware[];
 	}
-	let { rabbit, chors, say }: Props = $props();
+	let { rabbit, chors, firmwares }: Props = $props();
 
 	const name = $derived(rabbit.name ?? m.rabbit_unnamed());
 	const awake = $derived(rabbit.pulse_s !== null && rabbit.pulse_s <= AWAKE_S);
@@ -122,13 +122,27 @@
 	}
 	const focus = (el: HTMLElement) => el.focus();
 
-	let sentence = $state('');
-	const speak = () =>
-		gesture('say', async () => {
-			await api.say(sentence);
-			sentence = '';
-			return m.say_started();
+	// ── firmware: an image of the burrow, checked by the rabbit, then flashed ──
+	let image = $state('');
+	const imageLabel = (f: Firmware) => m.fw_image({ name: f.name.replace(/\.bin$/, ''), size: bytes(f.bytes) });
+	const imageOptions = $derived(firmwares.map((f) => ({ value: f.name, label: imageLabel(f) })));
+	const picked = $derived(firmwares.find((f) => f.name === image));
+	const fetchFirmware = (flash: boolean) =>
+		gesture(flash ? 'fw-flash' : 'fw-check', async () => {
+			await api.firmware(rabbit.ip, image, flash);
+			return flash ? m.fw_flashing({ name }) : m.fw_checking({ name });
 		});
+	let picker = $state<HTMLInputElement>();
+	const keep = (file: File | undefined) =>
+		file &&
+		gesture('fw-keep', async () => {
+			const kept = await api.keepFirmware(file);
+			if (picker) picker.value = '';
+			await live.refresh();
+			if (kept.reply) image = kept.reply;
+			return m.fw_uploaded({ name: (kept.reply ?? file.name).replace(/\.bin$/, ''), size: bytes(kept.bytes ?? 0) });
+		});
+
 </script>
 
 <article class="tile" aria-labelledby="{id}-name">
@@ -158,6 +172,7 @@
 		<div class="end">
 			<span class="chip mono">{rabbit.ip}</span>
 			{#if rabbit.version}<span class="chip accent">{m.rabbit_version({ version: rabbit.version })}</span>{/if}
+			{#if rabbit.firmware}<span class="chip mono">{m.rabbit_firmware({ build: rabbit.firmware })}</span>{/if}
 		</div>
 	</div>
 
@@ -273,25 +288,43 @@
 				</Accordion.Content>
 			</Accordion.Item>
 
-			{#if say}
-				<Accordion.Item value="say" class="more-item">
-					<Accordion.Header level={4}>
-						<Accordion.Trigger class="more-trigger"><Icon name="message-circle" />{m.section_say()}<Icon name="chevron-down" class="chev" /></Accordion.Trigger>
-					</Accordion.Header>
-					<Accordion.Content class="more-body">
-						<div class="field">
-							<label for="{id}-say">{m.say_label()}</label>
-							<textarea id="{id}-say" bind:value={sentence} maxlength="300" placeholder={m.say_placeholder()}></textarea>
-							<span class="help">{m.say_help({ count: 300 - sentence.length })}</span>
-						</div>
-						<div class="actions end">
-							<button class="btn primary" disabled={!sentence.trim() || busy !== null} onclick={speak}>
-								<Icon name="message-circle" busy={busy === 'say'} />{m.action_say()}
+			<Accordion.Item value="firmware" class="more-item">
+				<Accordion.Header level={4}>
+					<Accordion.Trigger class="more-trigger"><Icon name="cpu" />{m.section_firmware()}<Icon name="chevron-down" class="chev" /></Accordion.Trigger>
+				</Accordion.Header>
+				<Accordion.Content class="more-body">
+					<p class="hint">{rabbit.firmware ? m.fw_running({ build: rabbit.firmware }) : m.fw_running_unknown()}</p>
+					{#if rabbit.fw_last}<p class="verdict" role="status">{m.fw_last({ outcome: rabbit.fw_last })}</p>{/if}
+					{#if imageOptions.length}
+						<Select label={m.fw_library()} value={image} options={imageOptions} placeholder={m.fw_pick()} onchange={(v) => (image = v)} />
+						<p class="hint">{m.fw_check_help()}</p>
+					{:else}
+						<p class="hint">{m.fw_library_empty()}</p>
+					{/if}
+					<div class="actions fw-actions">
+						<input bind:this={picker} id="{id}-sim" class="sr-only" type="file" accept=".sim,.bin" onchange={(e) => keep(e.currentTarget.files?.[0])} />
+						<label class="btn" class:disabled={busy !== null} for="{id}-sim"><Icon name="upload" busy={busy === 'fw-keep'} />{m.fw_upload()}</label>
+						{#if imageOptions.length}
+							<span class="grow"></span>
+							<button class="btn" disabled={!picked || busy !== null} onclick={() => fetchFirmware(false)}>
+								<Icon name="check" busy={busy === 'fw-check'} />{m.action_fw_check()}
 							</button>
-						</div>
-					</Accordion.Content>
-				</Accordion.Item>
-			{/if}
+							<ConfirmDialog
+								title={m.fw_flash_title({ name })}
+								body={m.fw_flash_body({ image: picked ? imageLabel(picked) : '' })}
+								confirm={m.action_fw_flash()}
+								onconfirm={() => fetchFirmware(true)}
+							>
+								{#snippet trigger(props)}
+									<button {...props} class="btn danger" disabled={!picked || busy !== null}>
+										<Icon name="cpu" busy={busy === 'fw-flash'} />{m.action_fw_flash()}
+									</button>
+								{/snippet}
+							</ConfirmDialog>
+						{/if}
+					</div>
+				</Accordion.Content>
+			</Accordion.Item>
 		</Accordion.Root>
 	{:else}
 		<p class="hint">{m.rabbit_no_mac_hint()}</p>
@@ -310,14 +343,12 @@
 	.rename input { flex: 1 1 8rem; min-width: 0; }
 	.who { margin: 0; color: var(--ink-muted); }
 	.state { margin: 0; font: var(--t-secondary); color: var(--ink-muted); display: inline-flex; align-items: center; gap: var(--s-2); }
-	.condition.warn { color: var(--warn-text); }
+	.state.warn { color: var(--warn-text); }
 	/* awake: a filled disc; otherwise an empty ring (two shapes, never colour alone) */
 	.dot { width: 8px; height: 8px; border-radius: var(--radius-pill); border: 1.5px solid currentColor; flex: none; }
 	.dot.on { background: var(--status-ok); border-color: var(--status-ok); }
-	.end { display: flex; flex-direction: column; align-items: flex-end; gap: var(--s-1); }
-	@media (max-width: 599px) {
-		.end { flex-direction: row; width: 100%; align-items: center; }
-	}
+	/* where it lives and what it runs: a row of its own under the name, whatever the width */
+	.end { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-2); width: 100%; }
 
 	/* four gestures in a row, two by two when the tile is narrow (no word cut at 320 px) */
 	.gestures { display: grid; grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr)); gap: var(--s-2); }
@@ -338,6 +369,13 @@
 	:global(.more-trigger .chev) { margin-left: auto; transition: transform 0.2s; color: var(--ink-muted); }
 	:global(.more-trigger[data-state='open'] .chev) { transform: rotate(180deg); }
 	:global(.more-body) { display: grid; gap: var(--s-3); padding: var(--s-2) var(--s-1) var(--s-4); }
+
+	.verdict { margin: 0; font: var(--t-secondary); font-weight: 600; overflow-wrap: anywhere; }
+	.fw-actions .grow { flex: 1; }
+	label.btn { cursor: pointer; }
+	label.btn.disabled { opacity: 0.55; pointer-events: none; }
+	/* the hidden picker hands its focus ring to the label that stands for it */
+	input.sr-only:focus-visible + label.btn { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 	.inline { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s-2); align-items: end; }
 	.inline .btn { min-height: var(--control-h); }

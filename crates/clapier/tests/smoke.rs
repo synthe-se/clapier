@@ -22,7 +22,7 @@ async fn spawn_server_full(
     overlay: Option<std::path::PathBuf>,
     garenne: Option<std::path::PathBuf>,
 ) -> SocketAddr {
-    let app = AppState::new(root, overlay, None, None, garenne);
+    let app = AppState::new(root, overlay, None, garenne);
     let router = clapier::router(app);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -164,11 +164,10 @@ async fn fleet_remembers_the_boot_fetch() {
     })
     .await
     .expect("join");
-    let status = tokio::task::spawn_blocking(move || {
-        raw_request(addr, b"GET /_clapier/api/status HTTP/1.0\r\n\r\n")
-    })
-    .await
-    .expect("join");
+    let status =
+        tokio::task::spawn_blocking(move || raw_request(addr, b"GET /api/status HTTP/1.0\r\n\r\n"))
+            .await
+            .expect("join");
 
     let json = String::from_utf8_lossy(&status);
     assert!(json.contains("\"mac\":\"0019db9c2815\""), "status: {json}");
@@ -226,7 +225,12 @@ async fn the_web_app_stands_and_the_pilot_guards() {
     assert!(text.starts_with("http/1.0 200"), "{text}");
     assert!(text.contains("content-security-policy:"), "{text}");
     assert!(text.contains("<!doctype html>"), "{text}");
-    for path in ["/_clapier", "/_clapier/", "/_clapier/pilot"] {
+    for path in [
+        "/_clapier",
+        "/_clapier/",
+        "/_clapier/pilot",
+        "/_clapier/api/status",
+    ] {
         let request = format!("GET {path} HTTP/1.0\r\n\r\n");
         let moved = tokio::task::spawn_blocking(move || raw_request(addr, request.as_bytes()))
             .await
@@ -237,7 +241,7 @@ async fn the_web_app_stands_and_the_pilot_guards() {
     }
 
     let missing = tokio::task::spawn_blocking(move || {
-        raw_request(addr, b"GET /_clapier/assets/nothing.js HTTP/1.0\r\n\r\n")
+        raw_request(addr, b"GET /assets/nothing.js HTTP/1.0\r\n\r\n")
     })
     .await
     .expect("join");
@@ -245,7 +249,7 @@ async fn the_web_app_stands_and_the_pilot_guards() {
 
     let body = r#"{"ip":"192.168.1.99","cmd":"reboot"}"#;
     let request = format!(
-        "POST /_clapier/api/ctl HTTP/1.0\r\ncontent-type: application/json\r\n\
+        "POST /api/ctl HTTP/1.0\r\ncontent-type: application/json\r\n\
 content-length: {}\r\n\r\n{body}",
         body.len()
     );
@@ -276,7 +280,7 @@ async fn a_rabbit_keeps_its_name() {
 
     let body = r#"{"mac":"0019db9c2815","name":" Garen "}"#;
     let request = format!(
-        "POST /_clapier/api/name HTTP/1.0\r\ncontent-type: application/json\r\n\
+        "POST /api/name HTTP/1.0\r\ncontent-type: application/json\r\n\
 content-length: {}\r\n\r\n{body}",
         body.len()
     );
@@ -293,11 +297,10 @@ content-length: {}\r\n\r\n{body}",
         "Garen\n"
     );
 
-    let status = tokio::task::spawn_blocking(move || {
-        raw_request(addr, b"GET /_clapier/api/status HTTP/1.0\r\n\r\n")
-    })
-    .await
-    .expect("join");
+    let status =
+        tokio::task::spawn_blocking(move || raw_request(addr, b"GET /api/status HTTP/1.0\r\n\r\n"))
+            .await
+            .expect("join");
     let json = String::from_utf8_lossy(&status);
     assert!(json.contains(r#""name":"Garen""#), "status: {json}");
 }

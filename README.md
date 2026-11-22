@@ -25,7 +25,9 @@ Nothing else to install.
 
 1. **Flash once.** Head button + power: the rabbit opens a `NabaztagXX`
    access point. Join it, run `./flash-nabaztag Nab-wpa23-gtk-*.sim`.
-   The bootloader is never touched: a bad flash is always recoverable.
+   This rewrites the whole firmware and nothing sits behind it: keep
+   the power steady. A flash that went wrong is recovered over JTAG
+   ([nabgcc's guide](https://github.com/uplg/nabgcc/blob/master/docs/jtag-debrick.md)).
 2. **Serve.** `./clapier --bind 0.0.0.0:80 --overlay overlay` on any
    always-on box (port 80 on Linux: root, or
    `sudo setcap 'cap_net_bind_service=+ep' ./clapier`).
@@ -50,8 +52,7 @@ Or `just serve`. On a Raspberry Pi 1 (Alpine/OpenRC):
 `PI_HOST=root@<pi> just pi` cross-builds and installs the service,
 which then answers at `http://clapier.local/` (mDNS through avahi).
 `./garenne/build.sh test` runs the rabbit's golden suite,
-`./garenne/build.sh` builds its brain. Speech (`--say-script`,
-`just say "Bonjour."`) wants [pocket-tts](vendor/pocket-tts) built once.
+`./garenne/build.sh` builds its brain.
 
 `just check` runs what CI runs: fmt, clippy and tests for the server,
 svelte-check, the i18n and CSS checks and the tests for the web app;

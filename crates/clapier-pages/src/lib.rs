@@ -25,8 +25,18 @@ pub fn asset(path: &str) -> Option<Asset> {
         .map(|(name, bytes)| Asset {
             bytes,
             mime: mime(name),
-            immutable: name.starts_with("assets/"),
+            immutable: hashed(name),
         })
+}
+
+/// `index-Dzi4fA_z.js`: a dash and eight characters of content hash
+/// before the extension, which the files we name ourselves never have.
+fn hashed(name: &str) -> bool {
+    name.rsplit_once('.').is_some_and(|(stem, _)| {
+        stem.len() > 9
+            && stem.is_char_boundary(stem.len() - 9)
+            && stem.as_bytes()[stem.len() - 9] == b'-'
+    })
 }
 
 /// The web app's shell, served for every page of it.

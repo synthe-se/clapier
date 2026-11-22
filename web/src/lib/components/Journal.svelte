@@ -17,6 +17,9 @@
 	let all = $state(false);
 	const kept = $derived(onlyRabbits ? hits.filter((h) => h.rabbit) : hits);
 	const shown = $derived(all ? kept : kept.slice(0, PAGE));
+	// what was asked for: the path, without the doubled slashes of the 2006 boot and without the
+	// query a rabbit signs every request with (the whole address stays one hover away)
+	const asked = (uri: string) => uri.split('?')[0].replace(/\/{2,}/g, '/');
 </script>
 
 <div class="group-head">
@@ -32,7 +35,7 @@
 		{#each shown as h, i (`${h.ago_ms}-${h.uri}-${i}`)}
 			<li class="list-row hit" class:warn={h.status >= 400}>
 				<span class="lead" class:rabbit={h.rabbit}><Icon name={h.rabbit ? 'rabbit' : 'globe'} size={16} label={h.rabbit ? m.journal_from_rabbit() : undefined} /></span>
-				<span class="title mono"><span class="method">{h.method}</span> {h.uri}</span>
+				<span class="title mono" title={h.uri}><span class="method">{h.method}</span> {asked(h.uri)}</span>
 				<span class="meta">{h.status} · {bytes(h.bytes)}</span>
 				<span class="second">{ago(h.ago_ms / 1000)} · <span class="mono">{h.peer}</span></span>
 			</li>

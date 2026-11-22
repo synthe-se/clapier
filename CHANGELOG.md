@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `server IP[:PORT][/PATH]` control verb (garenne 0.13.0): a rabbit
+  moves to another clapier without the config portal. It first fetches
+  its own `bc.jsp` from the candidate, and only a real bytecode gets
+  the config sector's server field rewritten and the rabbit rebooted
+  onto its new home; anything else changes nothing.
+
+- Firmware over the air (garenne 0.14.0): `fw /vl/PATH LEN ADLER32`
+  has a rabbit fetch a raw image from clapier on its usual network and
+  flash it, no config mode. Nothing is written unless the transfer is
+  complete, opens on ARM vectors, fits below the config sector and
+  matches the checksum; `fwcheck` does all of it but the write.
+  `flash-nabaztag FILE.sim --export-bin OUT` prepares the image and
+  prints the verb.
+- Garenne reports the firmware build it runs on (`firmware=` on its
+  status page, `fw=` in `conf`), for nabgcc boots that sign the env.
+
+- The web app updates a rabbit's firmware: drop a `.sim`, have the
+  rabbit check it (nothing written), then flash it behind a
+  confirmation. Clapier computes what the rabbit must find; the tile
+  shows the build it runs on and how its last fetch ended.
+
+### Changed
+
+- The web app's addresses are plain: its JSON under `/api`, its files
+  under `/assets`, `/health`. Everything under `/_clapier` leads home.
+- One rabbit takes the room it is given, the journal sits beside it on
+  a wide screen and lists what was asked, not the whole query string.
+
+### Removed
+
+- Speech: the pocket-tts submodule, `--say-script`, the web app's
+  speech box, `just say`, `rabbit-say.sh` and the weather script and
+  launchd agent that rode on it. It was never used.
+
+### Fixed
+
+- A rabbit could be listed twice (once per address it had lived at,
+  or after anything asked in its name), and the web app stopped at
+  "Opening the burrow…" on the duplicate. A MAC is now one entry.
+- A rabbit up for more than 12.4 days reported a negative uptime: it
+  was counted in milliseconds, a 31-bit value on the rabbit's VM.
+
 ### Changed
 
 - Every dependency to its latest (Paraglide JS 3 for the web app);

@@ -32,6 +32,11 @@ struct Args {
     /// The rabbit's address in config mode
     #[arg(long, default_value = "192.168.0.1", env = "NABAZTAG_IP")]
     ip: String,
+
+    /// Do not flash: write the raw image a rabbit on its usual network
+    /// can fetch from clapier (garenne's `fw` verb), and print that verb
+    #[arg(long, value_name = "FILE")]
+    export_bin: Option<std::path::PathBuf>,
 }
 
 fn log(msg: &str) {
@@ -82,6 +87,54 @@ fn validate_sim(data: &[u8]) -> Result<()> {
         hex_payload_len / 2,
         data.len()
     ));
+    Ok(())
+}
+
+/// The firmware inside a `.sim`: hex decoded, then the Violet cipher
+/// undone (the boot's `uncrypt bin 0 nil 0x47 47`).
+fn decode_sim(sim: &[u8]) -> Result<Vec<u8>> {
+    let hex = &sim[16..sim.len() - 8];
+    if !hex.len().is_multiple_of(2) {
+        bail!("invalid .sim: odd number of hex digits");
+    }
+    let mut key: u8 = 0x47;
+    let mut bin = Vec::with_capacity(hex.len() / 2);
+    for pair in hex.chunks(2) {
+        let pair = std::str::from_utf8(pair).context("payload is not ASCII")?;
+        let byte = u8::from_str_radix(pair, 16).context("payload is not hex")?;
+        let plain = byte.wrapping_sub(47).wrapping_mul(key);
+        bin.push(plain);
+        key = plain.wrapping_add(plain).wrapping_add(1);
+    }
+    Ok(bin)
+}
+
+/// Adler-32, the checksum garenne recomputes before it flashes.
+fn adler32(data: &[u8]) -> u32 {
+    let (mut a, mut b) = (1u32, 0u32);
+    for &byte in data {
+        a = (a + u32::from(byte)) % 65521;
+        b = (b + a) % 65521;
+    }
+    (b << 16) | a
+}
+
+/// Write the raw image and say how to hand it to a rabbit.
+fn export_bin(sim: &[u8], out: &std::path::Path) -> Result<()> {
+    let bin = decode_sim(sim)?;
+    if bin.len() < 0x1000 || bin.len() > 0x1F000 {
+        bail!("{} bytes is not a firmware's size", bin.len());
+    }
+    std::fs::write(out, &bin).with_context(|| format!("cannot write {out:?}"))?;
+    let name = out
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let tail = format!("/vl/fw/{name} {} {:08x}", bin.len(), adler32(&bin));
+    ok(&format!("raw image written: {out:?}"));
+    log("serve it from clapier's overlay as common/vl/fw/, then tell the rabbit:");
+    println!("    grn1 fwcheck {tail}    (fetch and verify, write nothing)");
+    println!("    grn1 fw {tail}         (fetch, verify, flash)");
     Ok(())
 }
 
@@ -236,6 +289,10 @@ fn main() -> Result<()> {
     let sim = std::fs::read(&args.firmware)
         .with_context(|| format!("cannot read {:?}", args.firmware))?;
     log(&format!("firmware : {:?}", args.firmware));
+    if let Some(out) = &args.export_bin {
+        validate_sim(&sim)?;
+        return export_bin(&sim, out);
+    }
     log(&format!("target   : {}", args.ip));
     println!();
     validate_sim(&sim)?;
@@ -246,7 +303,27 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_sim;
+    use super::{adler32, decode_sim, validate_sim};
+
+    #[test]
+    fn adler32_matches_the_reference() {
+        assert_eq!(adler32(b"Wikipedia"), 0x11E6_0398);
+    }
+
+    #[test]
+    fn decodes_what_the_violet_cipher_encoded() {
+        // "Nab" through encode8(key 0x47, alpha 47), by hand.
+        let plain = b"Nab";
+        let inv = |k: u8| (0..=255u8).find(|x| x.wrapping_mul(k) == 1).unwrap();
+        let mut key = 0x47u8;
+        let mut hex = String::new();
+        for &v in plain {
+            hex += &format!("{:02x}", 47u8.wrapping_add(v.wrapping_mul(inv(key))));
+            key = v.wrapping_add(v).wrapping_add(1);
+        }
+        let sim = format!("-violet-{:08x}{hex}-violet-", hex.len());
+        assert_eq!(decode_sim(sim.as_bytes()).unwrap(), plain);
+    }
 
     fn fake_sim(payload_hex_len: usize) -> Vec<u8> {
         let mut sim = Vec::new();

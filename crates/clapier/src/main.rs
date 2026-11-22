@@ -37,11 +37,6 @@ struct Args {
     #[arg(long, default_value_t = 9999)]
     pulse_port: u16,
 
-    /// Script the pilot page's speech box runs (one argument: the
-    /// sentence); unset leaves the box disabled
-    #[arg(long)]
-    say_script: Option<PathBuf>,
-
     /// Seconds between /status polls of the fleet's rabbits; 0 turns
     /// the poller off
     #[arg(long, default_value_t = 30)]
@@ -112,13 +107,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    let app = AppState::new(
-        root.clone(),
-        overlay.clone(),
-        args.rabbit,
-        args.say_script,
-        garenne,
-    );
+    let app = AppState::new(root.clone(), overlay.clone(), args.rabbit, garenne);
     if args.pulse_port != 0 {
         tokio::spawn(clapier::listen_pulses(app.clone(), args.pulse_port));
     }

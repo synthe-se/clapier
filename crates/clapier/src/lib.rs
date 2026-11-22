@@ -4,6 +4,8 @@
 //! dialect, `clapier-journal` remembers requests, `clapier-pages` renders
 //! for humans. This crate only wires them together.
 
+pub mod firmware;
+
 use std::{
     net::{IpAddr, SocketAddr},
     path::PathBuf,
@@ -33,9 +35,6 @@ pub struct AppState {
     pub tree: ContentTree,
     pub rabbit: Option<IpAddr>,
     pub fleet: Fleet,
-    /// The speech pipeline lives Mac-side (TTS model, encoder); the
-    /// pilot page shells out to it when configured.
-    pub say_script: Option<PathBuf>,
     /// The garenne bytecode to install for rabbits whose burrow has no
     /// bc.jsp yet (the adoption); unset turns adoption off.
     pub garenne: Option<PathBuf>,
@@ -48,14 +47,12 @@ impl AppState {
         base: Option<PathBuf>,
         overlay: Option<PathBuf>,
         rabbit: Option<IpAddr>,
-        say_script: Option<PathBuf>,
         garenne: Option<PathBuf>,
     ) -> Arc<Self> {
         Arc::new(Self {
             tree: ContentTree { base, overlay },
             rabbit,
             fleet: Fleet::new(),
-            say_script,
             garenne,
             started: Instant::now(),
             journal: Journal::new(HISTORY),
@@ -227,8 +224,44 @@ pub fn vet_ctl(cmd: &str) -> Result<String, Refusal> {
         {
             Ok(format!("{verb} {path}"))
         }
+        // A firmware over the air: garenne fetches it from this clapier
+        // and refuses to write anything it cannot verify, so the gate
+        // only keeps the request well formed.
+        [verb @ ("fw" | "fwcheck"), path, len, sum]
+            if path.starts_with("/vl/")
+                && !path.contains("..")
+                && path.len() < 96
+                && len
+                    .parse::<u32>()
+                    .is_ok_and(|n| (0x1000..=0x1F000).contains(&n))
+                && sum.len() == 8
+                && sum.chars().all(|c| c.is_ascii_hexdigit()) =>
+        {
+            Ok(format!("{verb} {path} {len} {sum}"))
+        }
+        // Moving house: the rabbit itself checks that the new clapier
+        // serves its bytecode before it rewrites anything, so the gate
+        // only keeps the shape garenne can find its way back from.
+        ["server", url] if server_url_ok(url) => Ok(format!("server {url}")),
         _ => Err(Refusal::NotAllowed),
     }
+}
+
+/// `ip[:port][/path]`, 40 characters at most: the config sector's
+/// server field, which garenne reads back without DNS.
+fn server_url_ok(url: &str) -> bool {
+    let (hostport, path) = match url.find('/') {
+        Some(i) => url.split_at(i),
+        None => (url, ""),
+    };
+    let (host, port) = match hostport.split_once(':') {
+        Some((host, port)) => (host, Some(port)),
+        None => (hostport, None),
+    };
+    url.len() <= 40
+        && host.parse::<std::net::Ipv4Addr>().is_ok()
+        && port.is_none_or(|p| p.parse::<u16>().is_ok_and(|p| p != 0))
+        && path.chars().all(|c| c.is_ascii_graphic())
 }
 
 fn mac_ok(mac: &str) -> bool {
@@ -253,6 +286,43 @@ mod tests {
             vet_ctl("chor /vl/config/chor/taichi.chor"),
             Ok("chor /vl/config/chor/taichi.chor".to_string())
         );
+    }
+
+    #[test]
+    fn the_gate_lets_a_rabbit_move_house() {
+        assert_eq!(
+            vet_ctl("server 192.168.1.10/vl"),
+            Ok("server 192.168.1.10/vl".to_string())
+        );
+        assert_eq!(
+            vet_ctl("server 192.168.1.103:80/vl/"),
+            Ok("server 192.168.1.103:80/vl/".to_string())
+        );
+        for refused in [
+            "server r.nabaztag.com/vl",
+            "server 192.168.1.10:0/vl",
+            "server 192.168.1.10:http/vl",
+            "server 192.168.100.100:8080/a/very/long/path/vl/",
+            "server",
+        ] {
+            assert_eq!(vet_ctl(refused), Err(Refusal::NotAllowed), "{refused}");
+        }
+    }
+
+    #[test]
+    fn the_gate_lets_a_firmware_through_whole() {
+        assert_eq!(
+            vet_ctl("fwcheck /vl/fw/nab.bin 106744 11e60398"),
+            Ok("fwcheck /vl/fw/nab.bin 106744 11e60398".to_string())
+        );
+        for refused in [
+            "fw /etc/nab.bin 106744 11e60398",
+            "fw /vl/fw/nab.bin 126977 11e60398",
+            "fw /vl/fw/nab.bin 106744 398",
+            "fw /vl/fw/nab.bin",
+        ] {
+            assert_eq!(vet_ctl(refused), Err(Refusal::NotAllowed), "{refused}");
+        }
     }
 
     #[test]
@@ -368,23 +438,27 @@ pub async fn listen_pulses(app: Arc<AppState>, port: u16) {
 
 pub fn router(app: Arc<AppState>) -> Router {
     Router::new()
-        // The web app lives at the root: rabbits only ever ask under /vl.
-        // Its files and API stay under /_clapier, out of the rabbits' way;
-        // the old addresses lead home.
+        // The web app lives at the root, its files under /assets and its
+        // JSON under /api: rabbits only ever ask under /vl. The addresses
+        // of before (/_clapier and all below) lead home.
         .route("/", get(web_shell))
+        .route("/health", get(|| async { "ok" }))
+        .route("/api/status", get(api_status))
+        .route("/api/ctl", post(api_ctl))
+        .route("/api/dance", post(api_dance))
+        .route("/api/name", post(api_name))
+        .route("/api/firmware", post(api_firmware))
+        .route(
+            "/api/firmware/{name}",
+            axum::routing::put(api_firmware_upload),
+        )
+        .route("/assets/{*path}", get(web_asset))
         .route("/_clapier", get(|| async { Redirect::permanent("/") }))
         .route("/_clapier/", get(|| async { Redirect::permanent("/") }))
         .route(
-            "/_clapier/pilot",
+            "/_clapier/{*path}",
             get(|| async { Redirect::permanent("/") }),
         )
-        .route("/_clapier/health", get(|| async { "ok" }))
-        .route("/_clapier/api/status", get(api_status))
-        .route("/_clapier/api/ctl", post(api_ctl))
-        .route("/_clapier/api/dance", post(api_dance))
-        .route("/_clapier/api/say", post(api_say))
-        .route("/_clapier/api/name", post(api_name))
-        .route("/_clapier/{*path}", get(web_asset))
         .fallback(serve_content)
         .with_state(app)
 }
@@ -541,6 +615,112 @@ async fn api_ctl(
     }
 }
 
+impl From<firmware::Rejected> for ApiError {
+    fn from(rejected: firmware::Rejected) -> Self {
+        Self::new(StatusCode::UNPROCESSABLE_ENTITY, rejected.code())
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct FirmwareRequest {
+    ip: String,
+    /// An image's file name, as the status lists it.
+    name: String,
+    /// `false` has the rabbit fetch and verify, and write nothing.
+    flash: bool,
+}
+
+/// Hands a rabbit one of the overlay's images: the length and checksum
+/// it must find are computed from the file as it is served right now.
+async fn api_firmware(
+    State(app): State<Arc<AppState>>,
+    Json(req): Json<FirmwareRequest>,
+) -> Result<Json<Reply>, ApiError> {
+    let ip = known_rabbit(&app, &req.ip)?;
+    let Some(overlay) = app.tree.overlay.clone() else {
+        return Err(ApiError::new(StatusCode::CONFLICT, "no_overlay"));
+    };
+    let name = firmware::listed_name(&req.name).ok_or(firmware::Rejected::Name)?;
+    let bin = tokio::fs::read(firmware::dir(&overlay).join(name))
+        .await
+        .map_err(|_| ApiError::new(StatusCode::NOT_FOUND, "fw_missing"))?;
+    firmware::check(&bin)?;
+    let verb = if req.flash { "fw" } else { "fwcheck" };
+    let cmd = vet_ctl(&format!("{verb} {}", firmware::verb_args(name, &bin)))?;
+    match ctl_send(ip, &cmd).await {
+        Ok(reply) => Ok(Json(Reply {
+            reply: Some(reply),
+            bytes: Some(bin.len()),
+        })),
+        Err(_) => Err(ApiError::new(StatusCode::GATEWAY_TIMEOUT, "no_reply")),
+    }
+}
+
+/// Keeps an uploaded firmware (a `.sim`, or a raw image) where the
+/// rabbits can fetch it. Nothing that is not a firmware is kept.
+async fn api_firmware_upload(
+    State(app): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    body: axum::body::Bytes,
+) -> Result<Json<Reply>, ApiError> {
+    let Some(overlay) = app.tree.overlay.clone() else {
+        return Err(ApiError::new(StatusCode::CONFLICT, "no_overlay"));
+    };
+    let name = firmware::file_name(&name)?;
+    let bin = firmware::image(&body)?;
+    let dir = firmware::dir(&overlay);
+    let tmp = dir.join(format!(".{name}.tmp"));
+    let written = async {
+        tokio::fs::create_dir_all(&dir).await?;
+        tokio::fs::write(&tmp, &bin).await?;
+        tokio::fs::rename(&tmp, dir.join(&name)).await
+    }
+    .await;
+    match written {
+        Ok(()) => {
+            info!("firmware kept: {name}, {} bytes", bin.len());
+            Ok(Json(Reply {
+                reply: Some(name),
+                bytes: Some(bin.len()),
+            }))
+        }
+        Err(_) => Err(ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "fw_keep_failed",
+        )),
+    }
+}
+
+/// Every image the overlay holds, by file name.
+async fn firmware_library(app: &AppState) -> Vec<FirmwareView> {
+    let mut out = Vec::new();
+    let Some(overlay) = &app.tree.overlay else {
+        return out;
+    };
+    if let Ok(mut entries) = tokio::fs::read_dir(firmware::dir(overlay)).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if firmware::listed_name(&name).is_none() {
+                continue;
+            }
+            if let Ok(meta) = entry.metadata().await {
+                out.push(FirmwareView {
+                    name,
+                    bytes: meta.len(),
+                });
+            }
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
+#[derive(serde::Serialize)]
+pub struct FirmwareView {
+    name: String,
+    bytes: u64,
+}
+
 #[derive(serde::Deserialize)]
 pub struct DanceRequest {
     mac: String,
@@ -625,36 +805,6 @@ async fn api_name(
         .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "name_failed"))
 }
 
-#[derive(serde::Deserialize)]
-pub struct SayRequest {
-    text: String,
-}
-
-async fn api_say(
-    State(app): State<Arc<AppState>>,
-    Json(req): Json<SayRequest>,
-) -> Result<StatusCode, ApiError> {
-    let Some(script) = app.say_script.clone() else {
-        return Err(ApiError::new(StatusCode::CONFLICT, "say_off"));
-    };
-    let text = req.text.trim().to_string();
-    if text.is_empty() || text.chars().count() > 300 {
-        return Err(ApiError::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "say_length",
-        ));
-    }
-    // Generation takes tens of seconds on the TTS model; fire and
-    // forget, the rabbit will start speaking when the MP3 lands.
-    match tokio::process::Command::new(&script).arg(&text).spawn() {
-        Ok(_) => Ok(StatusCode::ACCEPTED),
-        Err(_) => Err(ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "say_failed",
-        )),
-    }
-}
-
 async fn serve_content(
     State(app): State<Arc<AppState>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -719,9 +869,10 @@ pub struct StatusView {
     serving: String,
     /// The `--rabbit` IP, and how long ago it last asked anything.
     tagged: Option<Tagged>,
-    say: bool,
     rabbits: Vec<RabbitView>,
     chors: Vec<String>,
+    /// The firmware images a rabbit can be handed.
+    firmwares: Vec<FirmwareView>,
     journal: Vec<HitView>,
 }
 
@@ -751,6 +902,10 @@ pub struct RabbitView {
     choreo: Option<String>,
     reassoc: Option<u64>,
     tcp_retx: Option<u64>,
+    /// The nabgcc build it runs on, when its firmware says.
+    firmware: Option<String>,
+    /// How its last firmware fetch ended, in garenne's words.
+    fw_last: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -814,6 +969,8 @@ async fn api_status(State(app): State<Arc<AppState>>) -> Json<StatusView> {
                 choreo: status.and_then(|s| s.choreo.clone()),
                 reassoc: status.and_then(|s| s.reassoc),
                 tcp_retx: status.and_then(|s| s.tcp_retx),
+                firmware: status.and_then(|s| s.firmware.clone()),
+                fw_last: status.and_then(|s| s.fw_last.clone()),
             }
         })
         .collect();
@@ -830,9 +987,9 @@ async fn api_status(State(app): State<Arc<AppState>>) -> Json<StatusView> {
         uptime_s: app.started.elapsed().as_secs(),
         serving,
         tagged,
-        say: app.say_script.is_some(),
         rabbits,
         chors: chor_library(&app).await,
+        firmwares: firmware_library(&app).await,
         journal,
     })
 }

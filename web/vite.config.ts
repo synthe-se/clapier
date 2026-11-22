@@ -3,9 +3,9 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { defineConfig } from 'vitest/config';
 
 // One screen, no routes: plain Svelte. The build is embedded into the clapier binary
-// (crates/clapier-pages/build.rs): the page at /, its files and API under /_clapier/.
+// (crates/clapier-pages/build.rs): the page at /, its files under /assets/, its JSON under /api/.
 export default defineConfig({
-	base: '/_clapier/',
+	base: '/assets/',
 	plugins: [
 		svelte(),
 		paraglideVitePlugin({
@@ -16,7 +16,8 @@ export default defineConfig({
 			emitTsDeclarations: true
 		})
 	],
-	build: { target: 'es2023', assetsInlineLimit: 0 },
+	// no assets/ folder inside the build: it is already served as /assets/
+	build: { target: 'es2023', assetsInlineLimit: 0, assetsDir: '' },
 	test: {
 		expect: { requireAssertions: true },
 		restoreMocks: true,
@@ -26,6 +27,6 @@ export default defineConfig({
 	},
 	server: {
 		// `just serve` on :8080; CLAPIER=http://192.168.1.103 to look at the Pi's burrow
-		proxy: { '/_clapier/api': { target: process.env.CLAPIER ?? 'http://127.0.0.1:8080', changeOrigin: true } }
+		proxy: { '/api': { target: process.env.CLAPIER ?? 'http://127.0.0.1:8080', changeOrigin: true } }
 	}
 });
