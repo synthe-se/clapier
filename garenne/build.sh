@@ -8,7 +8,7 @@
 #   ./build.sh sim    simulator build + run (ANSI LED view; Ctrl-C to quit)
 #   ./build.sh test   golden-frame test suite in the simulator
 #
-# Requires the mtl-dev Docker image (debian bookworm amd64 + multilib).
+# Requires the mtl-dev Docker image (debian trixie amd64 + multilib).
 # The toolchain binaries are built inside that image on first use.
 set -euo pipefail
 

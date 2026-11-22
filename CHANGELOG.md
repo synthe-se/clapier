@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The Metal toolchain image (`vendor/metal`, which builds and tests
+  garenne locally and in the release workflow) moves from Debian
+  bookworm to trixie. The bytecode it produces is byte for byte the
+  same.
+
 ## [0.4.0] - 2026-11-22
 
 ### Added
