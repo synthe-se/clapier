@@ -28,7 +28,8 @@ const WORDS: Record<string, () => string> = {
 	sound_shape: m.error_sound_shape,
 	sound_name: m.error_file_name,
 	sound_size: m.error_sound_size,
-	sound_keep_failed: m.error_sound_keep_failed
+	sound_keep_failed: m.error_sound_keep_failed,
+	ears_failed: m.error_ears_failed
 };
 
 export function errorText(error: unknown): string {

@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dropped from the browser kept under `common/vl/sound` (4 MB at
   most, streamed as it is).
 
+- The ears, made practical: a rabbit in the web app whose ears follow
+  the sliders before anything is sent, three poses one tap away (up,
+  sideways, down), and "both ears are up now" to tell the burrow where
+  up is for this rabbit. No two ears agree on where their encoder's
+  zero points: from then on 0 is up for both, in what is shown and in
+  what is asked.
+
 ### Changed
 
 - The web app's addresses are plain: its JSON under `/api`, its files

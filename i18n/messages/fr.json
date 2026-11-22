@@ -143,5 +143,13 @@
 	"sound_help": "Le lapin lit le MP3 tel quel. Son décodeur de 2006 préfère le mono, 32 kHz, débit constant.",
 	"error_sound_shape": "Ce fichier n’est pas un MP3.",
 	"error_sound_size": "Trop gros pour le terrier : 4 Mo au plus.",
-	"error_sound_keep_failed": "Impossible de ranger le son dans le terrier."
+	"error_sound_keep_failed": "Impossible de ranger le son dans le terrier.",
+	"ears_calibrate": "Elles sont droites maintenant",
+	"ears_calibrate_help": "Aucune oreille n’a son zéro au même endroit. Mets-les toutes les deux bien droites avec les curseurs, puis dis-le : ensuite, 0 voudra dire dressée pour les deux.",
+	"ears_calibrated": "C’est noté : voilà à quoi ressemble « dressées » pour {name}.",
+	"ears_unknown": "Place d’abord les oreilles une fois, pour que {name} sache où elles sont.",
+	"error_ears_failed": "Impossible de retenir la position des oreilles dans le terrier.",
+	"ears_preset_up": "Dressées",
+	"ears_preset_flat": "À l’horizontale",
+	"ears_preset_down": "Tombantes"
 }

@@ -7,7 +7,7 @@
 	import { api, type Firmware, type Rabbit } from '#lib/api.ts';
 	import { ui } from '#lib/ui.svelte.ts';
 	import { ago, bytes, duration } from '#lib/i18n.svelte.ts';
-	import { AWAKE_S, earPose, ears as parseEars, mac as formatMac } from '#lib/format.ts';
+	import { AWAKE_S, earPose, earTurn, ears as parseEars, mac as formatMac } from '#lib/format.ts';
 	import { live } from '#lib/live.svelte.ts';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import Icon, { type IconName } from './Icon.svelte';
@@ -24,7 +24,11 @@
 
 	const name = $derived(rabbit.name ?? m.rabbit_unnamed());
 	const awake = $derived(rabbit.pulse_s !== null && rabbit.pulse_s <= AWAKE_S);
-	const position = $derived(parseEars(rabbit.ears));
+	// what the rabbit reports, then the same counted from where each ear is up (once told):
+	// everything shown and asked below speaks the second, 0 being up for both
+	const reported = $derived(parseEars(rabbit.ears));
+	const up = $derived(rabbit.ears_up ?? [0, 0]);
+	const position = $derived<[number, number] | null>(reported ? [earTurn(reported[0], up[0]), earTurn(reported[1], up[1])] : null);
 	const id = $props.id();
 
 	// ── what the wire said, in words ──
@@ -99,6 +103,26 @@
 		// follow the rabbit until the person takes the sliders
 		if (position && !earsTouched) [left, right] = position;
 	});
+
+	// asked in positions counted from up, sent in the rabbit's own
+	const placeEars = (l: number, r: number) => {
+		[left, right] = [l, r];
+		return ctl('ears', `ears ${earTurn(l, -up[0])} ${earTurn(r, -up[1])}`).then(() => (earsTouched = false));
+	};
+	const poses: { key: string; at: number; label: () => string }[] = [
+		{ key: 'up', at: 0, label: m.ears_preset_up },
+		{ key: 'flat', at: 4, label: m.ears_preset_flat },
+		{ key: 'down', at: 8, label: m.ears_preset_down }
+	];
+
+	const calibrate = () =>
+		gesture('ears-up', async () => {
+			if (!reported) return m.ears_unknown({ name });
+			await api.earsUp(rabbit.mac!, reported);
+			earsTouched = false;
+			await live.refresh();
+			return m.ears_calibrated({ name });
+		});
 
 	// renamed in place: the title becomes a field, Enter keeps it, Escape leaves it
 	let renaming = $state(false);
@@ -284,30 +308,46 @@
 					</div>
 					<div role="group" aria-labelledby="{id}-ears" class="block">
 						<p class="label" id="{id}-ears">{m.fact_ears()}</p>
-						{#each [{ side: m.ear_left(), get: () => left, set: (v: number) => (left = v) }, { side: m.ear_right(), get: () => right, set: (v: number) => (right = v) }] as ear (ear.side)}
-							<div class="ear">
-								<span class="ear-side">{ear.side}</span>
-								<Slider.Root
-									type="single"
-									min={0}
-									max={16}
-									step={1}
-									value={ear.get()}
-									onValueChange={(v) => {
-										earsTouched = true;
-										ear.set(v);
-									}}
-									class="slider"
-								>
-									<span class="track"><Slider.Range class="range" /></span>
-									<Slider.Thumb index={0} class="thumb" aria-label={m.ear_position({ side: ear.side })} />
-								</Slider.Root>
-								<span class="ear-value">{ear.get()}</span>
+						<!-- the rabbit as the sliders would leave it: seen before it is asked -->
+						<div class="ears-pick">
+							<div class="ears-preview"><RabbitAvatar ears={[left, right]} {awake} size={112} /></div>
+							<div class="ears-sliders">
+								{#each [{ side: m.ear_left(), get: () => left, set: (v: number) => (left = v) }, { side: m.ear_right(), get: () => right, set: (v: number) => (right = v) }] as ear (ear.side)}
+									<div class="ear">
+										<span class="ear-side">{ear.side}</span>
+										<Slider.Root
+											type="single"
+											min={0}
+											max={16}
+											step={1}
+											value={ear.get()}
+											onValueChange={(v) => {
+												earsTouched = true;
+												ear.set(v);
+											}}
+											class="slider"
+										>
+											<span class="track"><Slider.Range class="range" /></span>
+											<Slider.Thumb index={0} class="thumb" aria-label={m.ear_position({ side: ear.side })} />
+										</Slider.Root>
+										<span class="ear-value">{ear.get()}</span>
+									</div>
+								{/each}
 							</div>
-						{/each}
-						<div class="actions end">
-							<button class="btn primary" disabled={busy !== null} onclick={() => ctl('ears', `ears ${left} ${right}`).then(() => (earsTouched = false))}>
+						</div>
+						<div class="actions">
+							{#each poses as pose (pose.key)}
+								<button class="btn" disabled={busy !== null} onclick={() => placeEars(pose.at, pose.at)}>{pose.label()}</button>
+							{/each}
+							<span class="grow"></span>
+							<button class="btn primary" disabled={busy !== null} onclick={() => placeEars(left, right)}>
 								<Icon name="ear" busy={busy === 'ears'} />{m.action_ears()}
+							</button>
+						</div>
+						<p class="hint">{m.ears_calibrate_help()}</p>
+						<div class="actions end">
+							<button class="btn" disabled={busy !== null} onclick={calibrate}>
+								<Icon name="check" busy={busy === 'ears-up'} />{m.ears_calibrate()}
 							</button>
 						</div>
 					</div>
@@ -435,7 +475,6 @@
 	:global(.more-body) { display: grid; gap: var(--s-3); padding: var(--s-2) var(--s-1) var(--s-4); }
 
 	.verdict { margin: 0; font: var(--t-secondary); font-weight: 600; overflow-wrap: anywhere; }
-	.fw-actions .grow { flex: 1; }
 	label.btn { cursor: pointer; }
 	label.btn.disabled { opacity: 0.55; pointer-events: none; }
 	/* the hidden picker hands its focus ring to the label that stands for it */
@@ -461,6 +500,14 @@
 	/* off: a ring with a slash, not a black disc that reads as a colour */
 	.swatch.off { background: linear-gradient(135deg, transparent 45%, var(--ink-muted) 45% 55%, transparent 55%), var(--surface); }
 
+	.ears-pick { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s-3) var(--s-4); align-items: center; }
+	.ears-preview { display: grid; place-items: center; padding: var(--s-2); border-radius: var(--radius-l); background: var(--ground-raised); }
+	.ears-sliders { display: grid; min-width: 0; }
+	.actions .grow { flex: 1; }
+	@media (max-width: 420px) {
+		.ears-pick { grid-template-columns: minmax(0, 1fr); justify-items: center; }
+		.ears-sliders { width: 100%; }
+	}
 	.ear { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr) 2ch; align-items: center; gap: var(--s-3); min-height: var(--control-h); }
 	.ear-side { font: var(--t-secondary); color: var(--ink-muted); }
 	.ear-value { font: var(--t-label); font-variant-numeric: tabular-nums; text-align: right; }

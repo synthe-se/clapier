@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bytes, earPose, duration, earAngle, ears, mac } from './format.ts';
+import { bytes, earPose, duration, earAngle, earTurn, ears, mac } from './format.ts';
 
 describe('format', () => {
 	it('keeps the two largest units of a duration', () => {
@@ -25,6 +25,14 @@ describe('format', () => {
 
 	it('says how an ear stands', () => {
 		expect([0, 2, 4, 8, 13, 16].map(earPose)).toEqual(['up', 'tilted', 'flat', 'down', 'flat', 'tilted']);
+	});
+
+	it('counts an ear from where its up is', () => {
+		expect(earTurn(0, 0)).toBe(0);
+		expect(earTurn(3, 5)).toBe(15);
+		expect(earTurn(5, 3)).toBe(2);
+		// and back: what to ask the rabbit for a position counted from its up
+		expect(earTurn(15, -5)).toBe(3);
 	});
 
 	it('reads the ears, and only sane ones', () => {

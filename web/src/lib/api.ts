@@ -14,6 +14,8 @@ export interface Rabbit {
 	link: number | null;
 	rssi: number | null;
 	ears: string | null;
+	/** What `ears` reads when both ears are up, once the person said so; null until then. */
+	ears_up: [number, number] | null;
 	audio: string | null;
 	choreo: string | null;
 	reassoc: number | null;
@@ -92,6 +94,8 @@ export const api = {
 	ctl: (ip: string, cmd: string) => post<Reply>('ctl', { ip, cmd }),
 	dance: (mac: string, ip: string, cdl: string) => post<Reply>('dance', { mac, ip, cdl }),
 	name: (mac: string, name: string) => post<void>('name', { mac, name }),
+	/** Tells the burrow what the rabbit's `ears` read with both ears up. */
+	earsUp: (mac: string, up: [number, number]) => post<void>('ears', { mac, up }),
 	/** Hands a rabbit one of the burrow's images: to check it only, or to flash it. */
 	firmware: (ip: string, name: string, flash: boolean) => post<Reply>('firmware', { ip, name, flash }),
 	/** Keeps a .sim (or a raw image) in the burrow; answers the name it is kept under. */

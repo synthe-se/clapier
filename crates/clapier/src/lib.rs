@@ -95,6 +95,62 @@ fn name_path(overlay: &std::path::Path, mac: &str) -> PathBuf {
     overlay.join("rabbits").join(mac).join("name")
 }
 
+/// Where a rabbit's ears stand when they are up: the two positions its
+/// status reports then, in its order. No two rabbits agree on where
+/// their encoder's zero points, nor do the two ears of one.
+fn ears_up_path(overlay: &std::path::Path, mac: &str) -> PathBuf {
+    overlay.join("rabbits").join(mac).join("ears-up")
+}
+
+fn read_ears_up(overlay: &std::path::Path, mac: &str) -> Option<[u8; 2]> {
+    let text = std::fs::read_to_string(ears_up_path(overlay, mac)).ok()?;
+    let (a, b) = text.lines().next()?.trim().split_once(',')?;
+    let up = [a.parse().ok()?, b.parse().ok()?];
+    up.iter().all(|&p| p <= 16).then_some(up)
+}
+
+#[derive(serde::Deserialize)]
+pub struct EarsRequest {
+    mac: String,
+    /// The status' two positions with both ears up; `null` forgets them.
+    up: Option<[u8; 2]>,
+}
+
+async fn api_ears(
+    State(app): State<Arc<AppState>>,
+    Json(req): Json<EarsRequest>,
+) -> Result<StatusCode, ApiError> {
+    if !mac_ok(&req.mac) {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "bad_mac"));
+    }
+    if req.up.is_some_and(|up| up.iter().any(|&p| p > 16)) {
+        return Err(Refusal::Ears.into());
+    }
+    let Some(overlay) = app.tree.overlay.clone() else {
+        return Err(ApiError::new(StatusCode::CONFLICT, "no_overlay"));
+    };
+    let path = ears_up_path(&overlay, &req.mac);
+    let written = match req.up {
+        None => match tokio::fs::remove_file(&path).await {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        },
+        Some([a, b]) => {
+            let dir = path.parent().expect("ears have a burrow").to_path_buf();
+            let tmp = dir.join(".ears-up.tmp");
+            async {
+                tokio::fs::create_dir_all(&dir).await?;
+                tokio::fs::write(&tmp, format!("{a},{b}\n")).await?;
+                tokio::fs::rename(&tmp, &path).await
+            }
+            .await
+        }
+    };
+    written
+        .map(|()| StatusCode::NO_CONTENT)
+        .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "ears_failed"))
+}
+
 fn read_name(overlay: &std::path::Path, mac: &str) -> Option<String> {
     let text = std::fs::read_to_string(name_path(overlay, mac)).ok()?;
     let name = text.lines().next()?.trim();
@@ -467,6 +523,7 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route("/api/ctl", post(api_ctl))
         .route("/api/dance", post(api_dance))
         .route("/api/name", post(api_name))
+        .route("/api/ears", post(api_ears))
         .route("/api/firmware", post(api_firmware))
         .route(
             "/api/firmware/{name}",
@@ -1034,6 +1091,8 @@ pub struct RabbitView {
     link: Option<u8>,
     rssi: Option<i64>,
     ears: Option<String>,
+    /// The positions `ears` reports when both are up, once told.
+    ears_up: Option<[u8; 2]>,
     audio: Option<String>,
     choreo: Option<String>,
     reassoc: Option<u64>,
@@ -1101,6 +1160,10 @@ async fn api_status(State(app): State<Arc<AppState>>) -> Json<StatusView> {
                 link: r.pulse.as_ref().map(|p| p.link),
                 rssi: status.and_then(|s| s.rssi),
                 ears: status.and_then(|s| s.ears.clone()),
+                ears_up: match (&app.tree.overlay, &r.mac) {
+                    (Some(overlay), Some(mac)) => read_ears_up(overlay, mac),
+                    _ => None,
+                },
                 audio: status.and_then(|s| s.audio.clone()),
                 choreo: status.and_then(|s| s.choreo.clone()),
                 reassoc: status.and_then(|s| s.reassoc),

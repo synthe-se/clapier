@@ -45,5 +45,8 @@ export function ears(raw: string | null): [number, number] | null {
 	return p && p.length === 2 && p.every((n) => Number.isInteger(n) && n >= 0 && n <= 16) ? [p[0], p[1]] : null;
 }
 
+/** A position counted from another one, around the 17 holes of the turn. */
+export const earTurn = (position: number, from: number): number => (((position - from) % 17) + 17) % 17;
+
 /** A rabbit is awake while its 2 s pulse keeps coming (a few missed ones forgiven). */
 export const AWAKE_S = 10;

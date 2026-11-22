@@ -143,5 +143,13 @@
 	"sound_help": "The rabbit streams the MP3 as it is. Its 2006 decoder is happiest with mono, 32 kHz, constant bitrate.",
 	"error_sound_shape": "This file is not an MP3.",
 	"error_sound_size": "Too big for the burrow: 4 MB at most.",
-	"error_sound_keep_failed": "Could not keep the sound in the burrow."
+	"error_sound_keep_failed": "Could not keep the sound in the burrow.",
+	"ears_calibrate": "Both ears are up now",
+	"ears_calibrate_help": "No two ears agree on where their zero points. Bring both straight up with the sliders, then say so: from then on, 0 is up for both.",
+	"ears_calibrated": "Noted: this is what up looks like for {name}.",
+	"ears_unknown": "Place the ears once first, so that {name} knows where they are.",
+	"error_ears_failed": "Could not keep the ears' position in the burrow.",
+	"ears_preset_up": "Up",
+	"ears_preset_flat": "Sideways",
+	"ears_preset_down": "Down"
 }
