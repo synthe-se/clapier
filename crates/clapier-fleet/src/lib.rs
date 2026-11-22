@@ -65,6 +65,11 @@ pub struct Status {
     pub choreo: Option<String>,
     pub tcp_retx: Option<u64>,
     pub reassoc: Option<u64>,
+    /// The nabgcc build the rabbit runs on; `None` for firmwares that
+    /// do not say (garenne then reports `?`).
+    pub firmware: Option<String>,
+    /// How its last firmware fetch ended (`idle` until the first one).
+    pub fw_last: Option<String>,
 }
 
 /// Parses a `/status` body. Unknown keys are ignored, missing keys stay
@@ -82,6 +87,8 @@ pub fn parse_status(body: &str) -> Status {
             "choreo" => status.choreo = Some(value.to_string()),
             "tcp_retx" => status.tcp_retx = value.parse().ok(),
             "reassoc" => status.reassoc = value.parse().ok(),
+            "firmware" => status.firmware = (value != "?").then(|| value.to_string()),
+            "fw_last" => status.fw_last = (value != "idle").then(|| value.to_string()),
             _ => {}
         }
     }
@@ -117,61 +124,84 @@ impl Fleet {
         }
     }
 
+    /// The entry for this sighting: the rabbit wearing `mac` when one is
+    /// known (a MAC is the rabbit, an IP only where it lives today),
+    /// else the nameless one living at `ip`, else a new one. Whatever
+    /// else the register held for the same rabbit is folded into it, so
+    /// a rabbit is never listed twice - a re-lease used to leave one
+    /// entry per address it had lived at.
+    fn entry<'a>(rabbits: &'a mut Vec<Rabbit>, mac: Option<&str>, ip: IpAddr) -> &'a mut Rabbit {
+        let found = mac
+            .and_then(|mac| rabbits.iter().position(|r| r.mac.as_deref() == Some(mac)))
+            .or_else(|| rabbits.iter().position(|r| r.mac.is_none() && r.ip == ip))
+            .or_else(|| {
+                // a signed pulse may be all that names a rabbit: without
+                // a MAC to go by, whoever lives at this address is it
+                mac.is_none()
+                    .then(|| rabbits.iter().position(|r| r.ip == ip))
+                    .flatten()
+            });
+        let index = found.unwrap_or_else(|| {
+            rabbits.push(Rabbit {
+                mac: None,
+                ip,
+                last_boot: None,
+                last_pulse: None,
+                pulse: None,
+                status: None,
+                last_status: None,
+            });
+            rabbits.len() - 1
+        });
+        let mut kept = rabbits.remove(index);
+        if let Some(mac) = mac {
+            kept.mac = Some(mac.to_string());
+        }
+        kept.ip = ip; // a re-lease moves the rabbit, follow it
+        let same = |r: &Rabbit| match (&r.mac, &kept.mac) {
+            (Some(a), Some(b)) => a == b,
+            (None, _) => r.ip == ip,
+            (Some(_), None) => false,
+        };
+        let mut i = 0;
+        while i < rabbits.len() {
+            if same(&rabbits[i]) {
+                let other = rabbits.remove(i);
+                if other.last_pulse > kept.last_pulse {
+                    kept.last_pulse = other.last_pulse;
+                    kept.pulse = other.pulse;
+                }
+                if other.last_status > kept.last_status {
+                    kept.last_status = other.last_status;
+                    kept.status = other.status;
+                }
+                kept.last_boot = kept.last_boot.max(other.last_boot);
+            } else {
+                i += 1;
+            }
+        }
+        rabbits.push(kept);
+        rabbits.last_mut().expect("just pushed")
+    }
+
     /// An HTTP request carrying a valid `m` param: bind the MAC to the
     /// peer IP, adopting any MAC-less entry the pulses created there.
     /// `boot` marks a `bc.jsp` fetch, the rabbit's first breath.
     pub fn seen_http(&self, mac: &str, ip: IpAddr, boot: bool, at: Instant) {
         let mut rabbits = self.rabbits.lock().expect("fleet lock");
-        let entry = match rabbits.iter_mut().find(|r| r.mac.as_deref() == Some(mac)) {
-            Some(entry) => entry,
-            None => {
-                let adopted = rabbits.iter_mut().find(|r| r.mac.is_none() && r.ip == ip);
-                match adopted {
-                    Some(entry) => entry,
-                    None => {
-                        rabbits.push(Rabbit {
-                            mac: None,
-                            ip,
-                            last_boot: None,
-                            last_pulse: None,
-                            pulse: None,
-                            status: None,
-                            last_status: None,
-                        });
-                        rabbits.last_mut().expect("just pushed")
-                    }
-                }
-            }
-        };
-        entry.mac = Some(mac.to_string());
-        entry.ip = ip; // a re-lease moves the rabbit, follow it
+        let entry = Self::entry(&mut rabbits, Some(mac), ip);
         if boot {
             entry.last_boot = Some(at);
         }
     }
 
-    /// A pulse heard from `ip`: update the rabbit living there, or open
-    /// a MAC-less entry until an HTTP request names it.
+    /// A pulse heard from `ip`: update the rabbit that signed it (or the
+    /// one living there), or open an entry until an HTTP request names it.
     pub fn pulse(&self, ip: IpAddr, pulse: Pulse, at: Instant) {
         let mut rabbits = self.rabbits.lock().expect("fleet lock");
-        match rabbits.iter_mut().find(|r| r.ip == ip) {
-            Some(entry) => {
-                if pulse.mac.is_some() {
-                    entry.mac = pulse.mac.clone();
-                }
-                entry.last_pulse = Some(at);
-                entry.pulse = Some(pulse);
-            }
-            None => rabbits.push(Rabbit {
-                mac: pulse.mac.clone(),
-                ip,
-                last_boot: None,
-                last_pulse: Some(at),
-                pulse: Some(pulse),
-                status: None,
-                last_status: None,
-            }),
-        }
+        let entry = Self::entry(&mut rabbits, pulse.mac.as_deref(), ip);
+        entry.last_pulse = Some(at);
+        entry.pulse = Some(pulse);
     }
 
     /// A polled `/status` answer from `ip`. Unknown IPs are ignored:
@@ -224,6 +254,62 @@ mod tests {
         assert_eq!(s.choreo.as_deref(), Some("idle"));
         assert_eq!(s.tcp_retx, Some(3));
         assert_eq!(s.reassoc, Some(0));
+    }
+
+    fn pulse_of(mac: Option<&str>) -> Pulse {
+        Pulse {
+            version: "0.14.0".into(),
+            uptime_s: 1,
+            link: 4,
+            mac: mac.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn a_rabbit_that_moved_is_still_one_rabbit() {
+        let mac = "0019db9c2815";
+        let fleet = Fleet::new();
+        let now = Instant::now();
+        fleet.seen_http(mac, ip(155), true, now);
+        fleet.pulse(ip(155), pulse_of(Some(mac)), now);
+        // someone else asks in its name (a tool, a browser): the entry
+        // follows, and the rabbit's next pulse must not open a second one
+        fleet.seen_http(mac, ip(165), false, now);
+        fleet.pulse(ip(155), pulse_of(Some(mac)), now);
+        fleet.seen_http(mac, ip(155), true, now);
+        let snap = fleet.snapshot();
+        assert_eq!(snap.len(), 1, "one rabbit, listed once");
+        assert_eq!(snap[0].ip, ip(155));
+        assert_eq!(snap[0].mac.as_deref(), Some(mac));
+
+        // a new lease: unsigned pulses from the new address, then its boot
+        fleet.pulse(ip(42), pulse_of(None), now);
+        assert_eq!(fleet.snapshot().len(), 2, "nameless until it asks");
+        fleet.seen_http(mac, ip(42), true, now);
+        let snap = fleet.snapshot();
+        assert_eq!(snap.len(), 1, "claimed, not duplicated");
+        assert_eq!(snap[0].ip, ip(42));
+        assert!(snap[0].pulse.is_some());
+    }
+
+    #[test]
+    fn two_rabbits_stay_two() {
+        let fleet = Fleet::new();
+        let now = Instant::now();
+        fleet.seen_http("0019db9c2815", ip(155), true, now);
+        fleet.seen_http("0019db000001", ip(156), true, now);
+        fleet.pulse(ip(155), pulse_of(Some("0019db9c2815")), now);
+        fleet.pulse(ip(156), pulse_of(None), now);
+        assert_eq!(fleet.snapshot().len(), 2);
+    }
+
+    #[test]
+    fn the_status_page_names_the_firmware() {
+        assert_eq!(
+            parse_status("firmware=aae9e4cm\r\n").firmware.as_deref(),
+            Some("aae9e4cm")
+        );
+        assert_eq!(parse_status("firmware=?\r\n").firmware, None);
     }
 
     #[test]
