@@ -7,13 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- The Metal toolchain image (`vendor/metal`, which builds and tests
-  garenne locally and in the release workflow) moves from Debian
-  bookworm to trixie. The bytecode it produces is byte for byte the
-  same.
-
 ## [0.4.0] - 2026-11-22
 
 ### Added
@@ -53,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The archives carry nabgcc's `wpa23-gtk` r3 firmware: the first to
+  name its build, with the Wi-Fi fixes that came with it.
+- The Metal toolchain image (`vendor/metal`, which builds and tests
+  garenne locally and in the release workflow) moves from Debian
+  bookworm to trixie. The bytecode it produces is byte for byte the
+  same.
 - The web app's addresses are plain: its JSON under `/api`, its files
   under `/assets`, `/health`. Everything under `/_clapier` leads home.
 - One rabbit takes the room it is given, the journal sits beside it on

@@ -14,7 +14,7 @@ the 2006 rabbit WPA2/WPA3.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
-  <img src="docs/screenshot.png" alt="Clapier's web app: Garen, awake, its state, its gestures and the journal of what it asked">
+  <img src="docs/screenshot.png" alt="Clapier's web app: Garen, awake, the garenne and the firmware it runs, its state and its gestures">
 </picture>
 
 ## Install
@@ -91,8 +91,8 @@ behind a flash: do not unplug the rabbit during those seconds, and keep
 the JTAG guide within reach for a firmware that turns out not to boot.
 
 The tile names the build a rabbit runs on when its firmware says so
-(nabgcc's `portal-ui` line and later stamp it; older images show
-nothing and update all the same).
+(nabgcc's `wpa23-gtk` r3 and later; older images show nothing and
+update all the same).
 
 By hand, the same thing in two commands:
 
