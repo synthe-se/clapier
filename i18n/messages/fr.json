@@ -120,7 +120,7 @@
 	"fw_library_empty": "Aucun firmware dans le terrier pour l’instant : ajoute un fichier .sim.",
 	"fw_image": "{name} ({size})",
 	"fw_upload": "Ajouter un fichier .sim",
-	"fw_uploaded": "{name} rangé dans le terrier ({size}).",
+	"file_kept": "{name} rangé dans le terrier ({size}).",
 	"action_fw_check": "Vérifier",
 	"action_fw_flash": "Flasher",
 	"fw_check_help": "Vérifier fait télécharger et contrôler l’image par le lapin, sans rien écrire.",
@@ -131,7 +131,17 @@
 	"error_fw_shape": "Ce fichier n’est ni un .sim ni une image de firmware.",
 	"error_fw_size": "Ce fichier n’a pas la taille d’un firmware.",
 	"error_fw_vectors": "Ce fichier n’est pas un firmware de Nabaztag.",
-	"error_fw_name": "Renomme le fichier : lettres, chiffres, points et tirets seulement.",
+	"error_file_name": "Renomme le fichier : lettres, chiffres, points et tirets seulement.",
 	"error_fw_missing": "Cette image n’est plus dans le terrier.",
-	"error_fw_keep_failed": "Impossible de ranger le firmware dans le terrier."
+	"error_fw_keep_failed": "Impossible de ranger le firmware dans le terrier.",
+	"sound_pick": "Choisis un son",
+	"sound_library_empty": "Aucun MP3 dans le terrier pour l’instant : ajoutes-en un.",
+	"action_play": "Jouer",
+	"sound_volume": "Volume",
+	"action_volume": "Régler le volume",
+	"sound_upload": "Ajouter un MP3",
+	"sound_help": "Le lapin lit le MP3 tel quel. Son décodeur de 2006 préfère le mono, 32 kHz, débit constant.",
+	"error_sound_shape": "Ce fichier n’est pas un MP3.",
+	"error_sound_size": "Trop gros pour le terrier : 4 Mo au plus.",
+	"error_sound_keep_failed": "Impossible de ranger le son dans le terrier."
 }

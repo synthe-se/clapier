@@ -22,9 +22,13 @@ const WORDS: Record<string, () => string> = {
 	fw_shape: m.error_fw_shape,
 	fw_size: m.error_fw_size,
 	fw_vectors: m.error_fw_vectors,
-	fw_name: m.error_fw_name,
+	fw_name: m.error_file_name,
 	fw_missing: m.error_fw_missing,
-	fw_keep_failed: m.error_fw_keep_failed
+	fw_keep_failed: m.error_fw_keep_failed,
+	sound_shape: m.error_sound_shape,
+	sound_name: m.error_file_name,
+	sound_size: m.error_sound_size,
+	sound_keep_failed: m.error_sound_keep_failed
 };
 
 export function errorText(error: unknown): string {

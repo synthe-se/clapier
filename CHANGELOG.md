@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   confirmation. Clapier computes what the rabbit must find; the tile
   shows the build it runs on and how its last fetch ended.
 
+- The web app plays sounds: every MP3 of the burrow in one list (the
+  tribe's and the rabbit's own), a volume in percent, and an MP3
+  dropped from the browser kept under `common/vl/sound` (4 MB at
+  most, streamed as it is).
+
 ### Changed
 
 - The web app's addresses are plain: its JSON under `/api`, its files

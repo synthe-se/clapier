@@ -48,6 +48,8 @@ export interface Status {
 	rabbits: Rabbit[];
 	chors: string[];
 	firmwares: Firmware[];
+	/** The MP3s a rabbit can stream, as /vl paths. */
+	sounds: string[];
 	journal: Hit[];
 }
 
@@ -93,6 +95,9 @@ export const api = {
 	/** Hands a rabbit one of the burrow's images: to check it only, or to flash it. */
 	firmware: (ip: string, name: string, flash: boolean) => post<Reply>('firmware', { ip, name, flash }),
 	/** Keeps a .sim (or a raw image) in the burrow; answers the name it is kept under. */
+	/** Keeps an MP3 in the burrow; answers the /vl path it is served at. */
+	keepSound: (file: File) =>
+		call<Reply>(`sound/${encodeURIComponent(file.name)}`, { method: 'PUT', headers: { 'content-type': 'application/octet-stream' }, body: file }),
 	keepFirmware: (file: File) =>
 		call<Reply>(`firmware/${encodeURIComponent(file.name)}`, { method: 'PUT', headers: { 'content-type': 'application/octet-stream' }, body: file })
 };

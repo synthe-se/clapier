@@ -56,7 +56,7 @@
 				{#if rabbits.length}
 					<div class="tiles">
 						{#each rabbits as r (r.mac ?? r.ip)}
-							<RabbitTile rabbit={r} chors={s.chors} firmwares={s.firmwares} />
+							<RabbitTile rabbit={r} chors={s.chors} firmwares={s.firmwares} sounds={s.sounds} />
 						{/each}
 					</div>
 				{:else}

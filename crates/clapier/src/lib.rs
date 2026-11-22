@@ -326,6 +326,26 @@ mod tests {
     }
 
     #[test]
+    fn sounds_are_kept_under_plain_names() {
+        assert_eq!(sound_name("Bonjour.mp3").as_deref(), Some("Bonjour.mp3"));
+        assert_eq!(sound_name("C:\\x\\chime").as_deref(), Some("chime.mp3"));
+        assert_eq!(
+            sound_name("../../etc/passwd.mp3").as_deref(),
+            Some("passwd.mp3")
+        );
+        assert_eq!(sound_name("my song.mp3"), None);
+        assert_eq!(sound_name(".mp3"), None);
+        assert!(looks_like_mp3(b"ID3\x04\x00"));
+        assert!(looks_like_mp3(&[0xFF, 0xFB, 0x90, 0x00, 0x00]));
+        assert!(!looks_like_mp3(b"RIFF....WAVE"));
+        // what the library lists must pass the gate as a play verb
+        assert_eq!(
+            vet_ctl("play /vl/sound/Bonjour.mp3"),
+            Ok("play /vl/sound/Bonjour.mp3".to_string())
+        );
+    }
+
+    #[test]
     fn the_gate_remembers_the_supply() {
         assert_eq!(vet_ctl("vol 39"), Err(Refusal::VolFloor));
         assert_eq!(vet_ctl("vol 0"), Err(Refusal::VolFloor));
@@ -451,6 +471,11 @@ pub fn router(app: Arc<AppState>) -> Router {
         .route(
             "/api/firmware/{name}",
             axum::routing::put(api_firmware_upload),
+        )
+        .route(
+            "/api/sound/{name}",
+            axum::routing::put(api_sound_upload)
+                .layer(axum::extract::DefaultBodyLimit::max(2 * SOUND_MAX)),
         )
         .route("/assets/{*path}", get(web_asset))
         .route("/_clapier", get(|| async { Redirect::permanent("/") }))
@@ -691,6 +716,115 @@ async fn api_firmware_upload(
     }
 }
 
+/// The largest sound kept: the burrow's disk is a few megabytes of NAND.
+const SOUND_MAX: usize = 4 * 1024 * 1024;
+
+/// A path or a name a control verb carries untouched: no space, nothing
+/// a URL would have to escape.
+fn plain(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '/'))
+}
+
+/// The name an uploaded sound is kept under, or `None` for one the
+/// overlay would not keep.
+fn sound_name(upload_name: &str) -> Option<String> {
+    let base = upload_name.rsplit(['/', '\\']).next().unwrap_or_default();
+    let stem = base.strip_suffix(".mp3").unwrap_or(base);
+    (plain(stem) && !stem.contains('/') && !stem.starts_with('.') && stem.len() <= 48)
+        .then(|| format!("{stem}.mp3"))
+}
+
+/// An MP3 as the rabbit's decoder takes it: an ID3 tag or a frame sync.
+fn looks_like_mp3(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"ID3") || (bytes.len() > 4 && bytes[0] == 0xFF && bytes[1] & 0xE0 == 0xE0)
+}
+
+/// Keeps an uploaded MP3 where every rabbit can stream it.
+async fn api_sound_upload(
+    State(app): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    body: axum::body::Bytes,
+) -> Result<Json<Reply>, ApiError> {
+    let unprocessable = |code| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, code);
+    let Some(overlay) = app.tree.overlay.clone() else {
+        return Err(ApiError::new(StatusCode::CONFLICT, "no_overlay"));
+    };
+    let name = sound_name(&name).ok_or_else(|| unprocessable("sound_name"))?;
+    if body.len() > SOUND_MAX {
+        return Err(unprocessable("sound_size"));
+    }
+    if !looks_like_mp3(&body) {
+        return Err(unprocessable("sound_shape"));
+    }
+    let dir = overlay.join("common/vl/sound");
+    let tmp = dir.join(format!(".{name}.tmp"));
+    let written = async {
+        tokio::fs::create_dir_all(&dir).await?;
+        tokio::fs::write(&tmp, &body).await?;
+        tokio::fs::rename(&tmp, dir.join(&name)).await
+    }
+    .await;
+    match written {
+        Ok(()) => Ok(Json(Reply {
+            reply: Some(format!("/vl/sound/{name}")),
+            bytes: Some(body.len()),
+        })),
+        Err(_) => {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            Err(ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "sound_keep_failed",
+            ))
+        }
+    }
+}
+
+/// Every .mp3 the overlay can serve, as the /vl paths the rabbits ask:
+/// the tribe's, then each rabbit's own.
+async fn sound_library(app: &AppState) -> Vec<String> {
+    let mut out = Vec::new();
+    let Some(overlay) = &app.tree.overlay else {
+        return out;
+    };
+    let mut roots = vec![overlay.join("common/vl")];
+    for rabbit in app.fleet.snapshot() {
+        if let Some(mac) = rabbit.mac {
+            roots.push(overlay.join("rabbits").join(mac).join("vl"));
+        }
+    }
+    for root in roots {
+        // a small tree, walked a few levels deep and no further
+        let mut dirs = vec![(root, String::from("/vl"), 0u8)];
+        while let Some((dir, prefix, depth)) = dirs.pop() {
+            let Ok(mut entries) = tokio::fs::read_dir(&dir).await else {
+                continue;
+            };
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let path = format!("{prefix}/{name}");
+                let Ok(kind) = entry.file_type().await else {
+                    continue;
+                };
+                if kind.is_dir() && depth < 4 && !name.starts_with('.') {
+                    dirs.push((entry.path(), path, depth + 1));
+                } else if kind.is_file()
+                    && name.ends_with(".mp3")
+                    && plain(&path)
+                    && path.len() < 128
+                {
+                    out.push(path);
+                }
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out.truncate(300);
+    out
+}
+
 /// Every image the overlay holds, by file name.
 async fn firmware_library(app: &AppState) -> Vec<FirmwareView> {
     let mut out = Vec::new();
@@ -873,6 +1007,8 @@ pub struct StatusView {
     chors: Vec<String>,
     /// The firmware images a rabbit can be handed.
     firmwares: Vec<FirmwareView>,
+    /// The MP3s a rabbit can stream, as /vl paths.
+    sounds: Vec<String>,
     journal: Vec<HitView>,
 }
 
@@ -990,6 +1126,7 @@ async fn api_status(State(app): State<Arc<AppState>>) -> Json<StatusView> {
         rabbits,
         chors: chor_library(&app).await,
         firmwares: firmware_library(&app).await,
+        sounds: sound_library(&app).await,
         journal,
     })
 }

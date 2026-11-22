@@ -18,8 +18,9 @@
 		rabbit: Rabbit;
 		chors: string[];
 		firmwares: Firmware[];
+		sounds: string[];
 	}
-	let { rabbit, chors, firmwares }: Props = $props();
+	let { rabbit, chors, firmwares, sounds }: Props = $props();
 
 	const name = $derived(rabbit.name ?? m.rabbit_unnamed());
 	const awake = $derived(rabbit.pulse_s !== null && rabbit.pulse_s <= AWAKE_S);
@@ -122,6 +123,31 @@
 	}
 	const focus = (el: HTMLElement) => el.focus();
 
+	// ── sound: an MP3 of the burrow, streamed by the rabbit ──
+	let sound = $state('');
+	// the file's name; its folder too when two sounds share a name
+	const soundOptions = $derived(
+		sounds.map((p) => {
+			const parts = p.replace(/\.mp3$/, '').split('/');
+			const file = parts.pop()!;
+			const twin = sounds.some((o) => o !== p && o.endsWith(`/${file}.mp3`));
+			return { value: p, label: twin ? `${parts.pop()}/${file}` : file };
+		})
+	);
+	// the rabbit counts in attenuation, 40 its loudest and 254 near silence: the slider speaks percent
+	let volume = $state(100);
+	const attenuation = $derived(Math.round(254 - (volume * (254 - 40)) / 100));
+	let soundPicker = $state<HTMLInputElement>();
+	const keepSound = (file: File | undefined) =>
+		file &&
+		gesture('sound-keep', async () => {
+			const kept = await api.keepSound(file);
+			if (soundPicker) soundPicker.value = '';
+			await live.refresh();
+			if (kept.reply) sound = kept.reply;
+			return m.file_kept({ name: file.name.replace(/\.mp3$/, ''), size: bytes(kept.bytes ?? 0) });
+		});
+
 	// ── firmware: an image of the burrow, checked by the rabbit, then flashed ──
 	let image = $state('');
 	const imageLabel = (f: Firmware) => m.fw_image({ name: f.name.replace(/\.bin$/, ''), size: bytes(f.bytes) });
@@ -140,7 +166,7 @@
 			if (picker) picker.value = '';
 			await live.refresh();
 			if (kept.reply) image = kept.reply;
-			return m.fw_uploaded({ name: (kept.reply ?? file.name).replace(/\.bin$/, ''), size: bytes(kept.bytes ?? 0) });
+			return m.file_kept({ name: (kept.reply ?? file.name).replace(/\.bin$/, ''), size: bytes(kept.bytes ?? 0) });
 		});
 
 </script>
@@ -284,6 +310,44 @@
 								<Icon name="ear" busy={busy === 'ears'} />{m.action_ears()}
 							</button>
 						</div>
+					</div>
+				</Accordion.Content>
+			</Accordion.Item>
+
+			<Accordion.Item value="sound" class="more-item">
+				<Accordion.Header level={4}>
+					<Accordion.Trigger class="more-trigger"><Icon name="volume-2" />{m.fact_audio()}<Icon name="chevron-down" class="chev" /></Accordion.Trigger>
+				</Accordion.Header>
+				<Accordion.Content class="more-body">
+					{#if soundOptions.length}
+						<div class="inline">
+							<Select label={m.fact_audio()} hideLabel value={sound} options={soundOptions} placeholder={m.sound_pick()} onchange={(v) => (sound = v)} />
+							<button class="btn primary" disabled={!sound || busy !== null} onclick={() => ctl('play', `play ${sound}`)}>
+								<Icon name="play" busy={busy === 'play'} />{m.action_play()}
+							</button>
+						</div>
+					{:else}
+						<p class="hint">{m.sound_library_empty()}</p>
+					{/if}
+					<div role="group" aria-labelledby="{id}-volume" class="block">
+						<p class="label" id="{id}-volume">{m.sound_volume()}</p>
+						<div class="ear">
+							<span class="ear-side">{volume} %</span>
+							<Slider.Root type="single" min={0} max={100} step={5} value={volume} onValueChange={(v) => (volume = v)} class="slider">
+								<span class="track"><Slider.Range class="range" /></span>
+								<Slider.Thumb index={0} class="thumb" aria-label={m.sound_volume()} />
+							</Slider.Root>
+							<span></span>
+						</div>
+					</div>
+					<p class="hint">{m.sound_help()}</p>
+					<div class="actions fw-actions">
+						<input bind:this={soundPicker} id="{id}-mp3" class="sr-only" type="file" accept=".mp3,audio/mpeg" onchange={(e) => keepSound(e.currentTarget.files?.[0])} />
+						<label class="btn" class:disabled={busy !== null} for="{id}-mp3"><Icon name="upload" busy={busy === 'sound-keep'} />{m.sound_upload()}</label>
+						<span class="grow"></span>
+						<button class="btn" disabled={busy !== null} onclick={() => ctl('vol', `vol ${attenuation}`)}>
+							<Icon name="volume-2" busy={busy === 'vol'} />{m.action_volume()}
+						</button>
 					</div>
 				</Accordion.Content>
 			</Accordion.Item>

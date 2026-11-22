@@ -120,7 +120,7 @@
 	"fw_library_empty": "No firmware in the burrow yet: add a .sim file.",
 	"fw_image": "{name} ({size})",
 	"fw_upload": "Add a .sim file",
-	"fw_uploaded": "{name} kept in the burrow ({size}).",
+	"file_kept": "{name} kept in the burrow ({size}).",
 	"action_fw_check": "Check",
 	"action_fw_flash": "Flash",
 	"fw_check_help": "Check has the rabbit fetch and verify the image, and writes nothing.",
@@ -131,7 +131,17 @@
 	"error_fw_shape": "This file is not a .sim nor a firmware image.",
 	"error_fw_size": "This file does not have a firmware's size.",
 	"error_fw_vectors": "This file is not a Nabaztag firmware.",
-	"error_fw_name": "Rename the file: letters, digits, dots and dashes only.",
+	"error_file_name": "Rename the file: letters, digits, dots and dashes only.",
 	"error_fw_missing": "This image is no longer in the burrow.",
-	"error_fw_keep_failed": "Could not keep the firmware in the burrow."
+	"error_fw_keep_failed": "Could not keep the firmware in the burrow.",
+	"sound_pick": "Pick a sound",
+	"sound_library_empty": "No MP3 in the burrow yet: add one.",
+	"action_play": "Play",
+	"sound_volume": "Volume",
+	"action_volume": "Set the volume",
+	"sound_upload": "Add an MP3",
+	"sound_help": "The rabbit streams the MP3 as it is. Its 2006 decoder is happiest with mono, 32 kHz, constant bitrate.",
+	"error_sound_shape": "This file is not an MP3.",
+	"error_sound_size": "Too big for the burrow: 4 MB at most.",
+	"error_sound_keep_failed": "Could not keep the sound in the burrow."
 }
